@@ -5,9 +5,6 @@ Format-agnostic analysis routines for Physics Analysis GUI.
 
 Currently:
   - Z-Score PETH (get_zscore_slice, smooth_signal, bin_for_heatmap)
-
-Working on: 
-  - Fourier Transform 
 """
 
 import numpy as np
@@ -91,3 +88,62 @@ def bin_for_heatmap(z_seg, num_bins=300):
         return np.zeros(num_bins)
     bin_edges = np.linspace(0, len(z_seg), num_bins + 1).astype(int)
     return np.array([np.mean(z_seg[bin_edges[i]:bin_edges[i+1]]) for i in range(num_bins)])
+
+
+def compute_fft_slice(time_array, signal, center_t, fs, window=30):
+    """
+    Extract a time window around center_t and compute its FFT.
+
+    Applies mean removal and linear detrending before FFT to eliminate
+    the DC spike and slow drift, making physiological frequencies
+    (breathing ~0.3 Hz, heart rate ~1 Hz) visible.
+
+    Parameters
+    ----------
+    time_array : array
+    signal : array
+    center_t : float
+        Center time in seconds
+    fs : float
+        Sampling frequency in Hz
+    window : float
+        Total window size in seconds
+
+    Returns
+    -------
+    freqs : array
+        Positive frequencies in Hz
+    power : array
+        Power spectral density (magnitude squared)
+    seg_x : array
+        Time array of the extracted segment
+    seg_y : array
+        Signal values of the extracted segment
+    """
+    from scipy.signal import detrend
+
+    half_win  = window / 2
+    start_idx = np.searchsorted(time_array, center_t - half_win)
+    end_idx   = np.searchsorted(time_array, center_t + half_win)
+
+    seg_y = signal[start_idx:end_idx]
+    seg_x = time_array[start_idx:end_idx]
+
+    if len(seg_y) < 4:
+        return np.array([]), np.array([]), seg_x, seg_y
+
+    # 1. Remove linear trend (kills DC + slow drift)
+    seg_y = detrend(seg_y, type='linear')
+
+    # 2. Remove any residual mean
+    seg_y = seg_y - np.mean(seg_y)
+
+    # 3. Hanning window to reduce spectral leakage
+    windowed = seg_y * np.hanning(len(seg_y))
+
+    n     = len(windowed)
+    fft_y = np.fft.rfft(windowed)
+    freqs = np.fft.rfftfreq(n, d=1.0 / fs)
+    power = (np.abs(fft_y) ** 2) / n
+
+    return freqs, power, seg_x, seg_y
