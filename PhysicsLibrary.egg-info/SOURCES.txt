@@ -1,9 +1,0 @@
-README.md
-pyproject.toml
-PhysicsLibrary/__init__.py
-PhysicsLibrary/file_parser.py
-PhysicsLibrary/models.py
-PhysicsLibrary.egg-info/PKG-INFO
-PhysicsLibrary.egg-info/SOURCES.txt
-PhysicsLibrary.egg-info/dependency_links.txt
-PhysicsLibrary.egg-info/top_level.txt
