@@ -7,7 +7,9 @@ Data processing and analysis library for Physics Analysis GUI.
 from .file_parser import (
     choose_file,
     detect_format,
+    detect_format_file,
     load_dataset,
+    load_dataset_file,
     DataFormat,
     Dataset,
 )

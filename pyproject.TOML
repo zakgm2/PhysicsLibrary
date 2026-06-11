@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "PhysicsLibrary"
-version = "0.1.0"
+version = "1.0.0"
 description = "Data processing library for Physics"
 requires-python = ">=3.10"
 readme = README.md
@@ -12,3 +12,9 @@ readme = README.md
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["PhysicsLibrary*"]
+
+[tool.PhysicsLibrary.changelog]
+current_patch_notes = """
+Version 0.1.0: Made a GUI capable of handling different file types. Parser implemented. 
+Version 1.0.0: Fully loadable data sets, graphing functionality, so far only TDT and Oxysoft.  
+"""
