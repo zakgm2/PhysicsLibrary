@@ -29,6 +29,7 @@ from .analysis import (
     smooth_signal,
     bin_for_heatmap,
     compute_fft_slice,
+    annotate_fft_peaks,
 )
 
 from .models import (

@@ -147,3 +147,42 @@ def compute_fft_slice(time_array, signal, center_t, fs, window=30):
     power = (np.abs(fft_y) ** 2) / n
 
     return freqs, power, seg_x, seg_y
+
+
+def annotate_fft_peaks(ax_f, freqs, power, color, n_peaks=3):
+    """
+    Find top N peaks in a power spectrum and annotate them with
+    frequency and BPM labels directly on the axes.
+
+    Parameters
+    ----------
+    ax_f   : matplotlib Axes
+    freqs  : array
+    power  : array
+    color  : str
+    n_peaks: int
+    """
+    from scipy.signal import find_peaks
+
+    mask     = freqs >= 0.05
+    f_m      = freqs[mask]
+    p_m      = power[mask]
+    if len(p_m) < 3:
+        return
+    min_prom = 0.05 * p_m.max()
+    peaks, _ = find_peaks(p_m, prominence=min_prom)
+    if len(peaks) == 0:
+        return
+    top = sorted(peaks, key=lambda i: p_m[i], reverse=True)[:n_peaks]
+    for idx in top:
+        freq = f_m[idx]
+        pwr  = p_m[idx]
+        bpm  = freq * 60
+        ax_f.annotate(
+            f"{freq:.2f} Hz\n({bpm:.0f} bpm)",
+            xy=(freq, pwr),
+            xytext=(freq + 0.05, pwr * 0.92),
+            fontsize=7, color=color, fontweight='bold',
+            arrowprops=dict(arrowstyle='->', color=color, lw=0.8),
+        )
+        ax_f.axvline(freq, color=color, lw=0.7, linestyle=':', alpha=0.5)
