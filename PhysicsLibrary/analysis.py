@@ -8,7 +8,7 @@ Currently:
 """
 
 import numpy as np
-
+import pandas as pd
 
 def get_zscore_slice(time_array, signal, center_t, window=30):
     """
@@ -186,3 +186,50 @@ def annotate_fft_peaks(ax_f, freqs, power, color, n_peaks=3):
             arrowprops=dict(arrowstyle='->', color=color, lw=0.8),
         )
         ax_f.axvline(freq, color=color, lw=0.7, linestyle=':', alpha=0.5)
+        
+def compute_slope_segment(x_data, y_data, p1_idx, p2_idx, padding_pct=0.05):
+    """
+    Calculates the slope between two data indices and returns cropped segments 
+    of the original datasets centered around the selection.
+
+    Parameters
+    ----------
+    x_data : array
+    y_data : array
+    p1_idx : int
+        Index of the first selected point
+    p2_idx : int
+        Index of the second selected point
+    padding_pct : float
+        Percentage of the total array length to add as visual context padding
+
+    Returns
+    -------
+    dict
+        A structured container holding:
+        - 'slope': float
+        - 'crop_x': array
+        - 'crop_y': array
+        - 'x1', 'y1', 'x2', 'y2': snapped point coordinates
+    """
+    # Sort indices chronologically to avoid negative dx from backwards clicks
+    idx1, idx2 = sorted([p1_idx, p2_idx])
+    
+    x1, y1 = x_data[idx1], y_data[idx1]
+    x2, y2 = x_data[idx2], y_data[idx2]
+    
+    # Calculate geometric slope (rise over run)
+    slope = (y2 - y1) / (x2 - x1) if x2 != x1 else 0.0
+    
+    # Calculate situational padding bounds
+    window_padding = max(5, int(len(x_data) * padding_pct))
+    start_idx = max(0, idx1 - window_padding)
+    end_idx = min(len(x_data) - 1, idx2 + window_padding)
+    
+    return {
+        'slope': slope,
+        'crop_x': x_data[start_idx:end_idx+1],
+        'crop_y': y_data[start_idx:end_idx+1],
+        'x1': x1, 'y1': y1,
+        'x2': x2, 'y2': y2
+    }

@@ -28,8 +28,9 @@ from .analysis import (
     get_zscore_slice,
     smooth_signal,
     bin_for_heatmap,
+    compute_slope_segment,
     compute_fft_slice,
-    annotate_fft_peaks,
+    annotate_fft_peaks
 )
 
 from .models import (
