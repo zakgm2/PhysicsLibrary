@@ -332,8 +332,9 @@ def _parse_oxysoft_txt(
     col_map: dict[int, tuple[str, str]] = {}
     event_col: Optional[int] = None
 
-    in_legend   = False
-    in_data     = False
+    in_legend       = False
+    in_data         = False
+    fit_factor_col: Optional[int] = None
 
     with open(filepath, 'r', encoding='utf-8', errors='replace') as fh:
         for raw_line in fh:
@@ -359,7 +360,6 @@ def _parse_oxysoft_txt(
                 if all(p.isdigit() for p in stripped if p):
                     in_legend = False
                     in_data   = True
-                    # Build col_map from what we parsed
                     continue
 
                 # Legend rows look like: "2\tRx1 - Tx1 O2Hb (filename)"
@@ -373,7 +373,6 @@ def _parse_oxysoft_txt(
                     if '(Event)' in col_desc or 'Event' in col_desc:
                         event_col = col_idx - 1   # convert to 0-based
                     elif 'O2Hb' in col_desc:
-                        # Extract transmitter label e.g. "Tx1" from "Rx1 - Tx1 O2Hb ..."
                         m = re.search(r'Tx\d+', col_desc)
                         label = m.group(0) if m else f"Ch{col_idx}"
                         col_map[col_idx - 1] = ('O2Hb', label)
@@ -381,7 +380,9 @@ def _parse_oxysoft_txt(
                         m = re.search(r'Tx\d+', col_desc)
                         label = m.group(0) if m else f"Ch{col_idx}"
                         col_map[col_idx - 1] = ('HHb', label)
-                    # TSI / sample number → ignored
+                    elif 'Fit Factor' in col_desc:
+                        fit_factor_col = col_idx - 1   # 0-based
+                    # TSI%, sample number → ignored
                 continue
 
             # ---- data section -------------------------------------------
@@ -425,5 +426,8 @@ def _parse_oxysoft_txt(
 
     o2hb = np.array([data[:, idx] for idx, _ in o2hb_cols])  # (n_ch, n_samp)
     hhb  = np.array([data[:, idx] for idx, _ in hhb_cols])   # (n_ch, n_samp)
+
+    if fit_factor_col is not None and fit_factor_col < data.shape[1]:
+        metadata['fit_factor_mean'] = float(np.mean(data[:, fit_factor_col]))
 
     return o2hb, hhb, events, metadata, channel_labels, sample_rate

@@ -5,10 +5,12 @@ Format-agnostic analysis routines for Physics Analysis GUI.
 
 Currently:
   - Z-Score PETH (get_zscore_slice, smooth_signal, bin_for_heatmap)
+  - FFT (compute_fft_slice, annotate_fft_peaks)
+  - Curve fitting (compute_slope_segment, fit_model_to_segment)
 """
 
 import numpy as np
-import pandas as pd
+
 
 def get_zscore_slice(time_array, signal, center_t, window=30):
     """
@@ -112,13 +114,9 @@ def compute_fft_slice(time_array, signal, center_t, fs, window=30):
     Returns
     -------
     freqs : array
-        Positive frequencies in Hz
     power : array
-        Power spectral density (magnitude squared)
     seg_x : array
-        Time array of the extracted segment
     seg_y : array
-        Signal values of the extracted segment
     """
     from scipy.signal import detrend
 
@@ -132,13 +130,8 @@ def compute_fft_slice(time_array, signal, center_t, fs, window=30):
     if len(seg_y) < 4:
         return np.array([]), np.array([]), seg_x, seg_y
 
-    # 1. Remove linear trend (kills DC + slow drift)
-    seg_y = detrend(seg_y, type='linear')
-
-    # 2. Remove any residual mean
-    seg_y = seg_y - np.mean(seg_y)
-
-    # 3. Hanning window to reduce spectral leakage
+    seg_y    = detrend(seg_y, type='linear')
+    seg_y    = seg_y - np.mean(seg_y)
     windowed = seg_y * np.hanning(len(seg_y))
 
     n     = len(windowed)
@@ -186,50 +179,77 @@ def annotate_fft_peaks(ax_f, freqs, power, color, n_peaks=3):
             arrowprops=dict(arrowstyle='->', color=color, lw=0.8),
         )
         ax_f.axvline(freq, color=color, lw=0.7, linestyle=':', alpha=0.5)
-        
+
+
 def compute_slope_segment(x_data, y_data, p1_idx, p2_idx, padding_pct=0.05):
     """
-    Calculates the slope between two data indices and returns cropped segments 
-    of the original datasets centered around the selection.
+    Least-squares linear regression slope between two index boundaries.
 
     Parameters
     ----------
-    x_data : array
-    y_data : array
-    p1_idx : int
-        Index of the first selected point
-    p2_idx : int
-        Index of the second selected point
-    padding_pct : float
-        Percentage of the total array length to add as visual context padding
+    x_data      : array
+    y_data      : array
+    p1_idx      : int
+    p2_idx      : int
+    padding_pct : float   visual context padding
 
     Returns
     -------
-    dict
-        A structured container holding:
-        - 'slope': float
-        - 'crop_x': array
-        - 'crop_y': array
-        - 'x1', 'y1', 'x2', 'y2': snapped point coordinates
+    dict with slope, intercept, crop_x, crop_y, x1, y1, x2, y2
     """
-    # Sort indices chronologically to avoid negative dx from backwards clicks
     idx1, idx2 = sorted([p1_idx, p2_idx])
-    
-    x1, y1 = x_data[idx1], y_data[idx1]
-    x2, y2 = x_data[idx2], y_data[idx2]
-    
-    # Calculate geometric slope (rise over run)
-    slope = (y2 - y1) / (x2 - x1) if x2 != x1 else 0.0
-    
-    # Calculate situational padding bounds
-    window_padding = max(5, int(len(x_data) * padding_pct))
-    start_idx = max(0, idx1 - window_padding)
-    end_idx = min(len(x_data) - 1, idx2 + window_padding)
-    
+
+    fit_x = x_data[idx1:idx2 + 1]
+    fit_y = y_data[idx1:idx2 + 1]
+
+    if len(fit_x) < 2:
+        slope, intercept = 0.0, 0.0
+    else:
+        slope, intercept = np.polyfit(fit_x, fit_y, 1)
+
+    x1, y1 = fit_x[0],  fit_y[0]
+    x2, y2 = fit_x[-1], fit_y[-1]
+
+    pad        = max(5, int(len(x_data) * padding_pct))
+    start_idx  = max(0, idx1 - pad)
+    end_idx    = min(len(x_data) - 1, idx2 + pad)
+
     return {
-        'slope': slope,
-        'crop_x': x_data[start_idx:end_idx+1],
-        'crop_y': y_data[start_idx:end_idx+1],
+        'slope':     slope,
+        'intercept': intercept,
+        'crop_x':    x_data[start_idx:end_idx + 1],
+        'crop_y':    y_data[start_idx:end_idx + 1],
         'x1': x1, 'y1': y1,
-        'x2': x2, 'y2': y2
+        'x2': x2, 'y2': y2,
     }
+
+
+def fit_model_to_segment(x_seg, y_seg, model_fn, p0_fn):
+    """
+    Fit a model function to a data segment using scipy curve_fit.
+
+    Parameters
+    ----------
+    x_seg    : array
+    y_seg    : array
+    model_fn : callable   f(x, *params) -> y
+    p0_fn    : callable   f(x_seg, y_seg) -> list of initial guesses
+
+    Returns
+    -------
+    dict with popt, y_fit, r2, success, error
+    """
+    from scipy.optimize import curve_fit
+
+    try:
+        p0      = p0_fn(x_seg, y_seg)
+        popt, _ = curve_fit(model_fn, x_seg, y_seg, p0=p0, maxfev=10000)
+        y_fit   = model_fn(x_seg, *popt)
+        ss_res  = np.sum((y_seg - y_fit) ** 2)
+        ss_tot  = np.sum((y_seg - y_seg.mean()) ** 2)
+        r2      = 1 - ss_res / ss_tot if ss_tot > 0 else 0.0
+        return {"popt": popt, "y_fit": y_fit, "r2": r2,
+                "success": True, "error": None}
+    except Exception as e:
+        return {"popt": None, "y_fit": np.zeros_like(y_seg),
+                "r2": 0.0, "success": False, "error": str(e)}
