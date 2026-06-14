@@ -10,6 +10,8 @@ Currently:
 """
 
 import numpy as np
+from scipy.signal import detrend, find_peaks
+from scipy.optimize import curve_fit
 
 
 def get_zscore_slice(time_array, signal, center_t, window=30):
@@ -36,6 +38,7 @@ def get_zscore_slice(time_array, signal, center_t, window=30):
     seg_y = signal[start_idx:end_idx]
     seg_x = time_array[start_idx:end_idx]
 
+    # Clip extreme artefacts before z-scoring so outliers don't dominate the baseline std.
     seg_y = np.clip(seg_y, -5, 5)
 
     baseline_end    = len(seg_y) // 2
@@ -118,8 +121,6 @@ def compute_fft_slice(time_array, signal, center_t, fs, window=30):
     seg_x : array
     seg_y : array
     """
-    from scipy.signal import detrend
-
     half_win  = window / 2
     start_idx = np.searchsorted(time_array, center_t - half_win)
     end_idx   = np.searchsorted(time_array, center_t + half_win)
@@ -130,8 +131,7 @@ def compute_fft_slice(time_array, signal, center_t, fs, window=30):
     if len(seg_y) < 4:
         return np.array([]), np.array([]), seg_x, seg_y
 
-    seg_y    = detrend(seg_y, type='linear')
-    seg_y    = seg_y - np.mean(seg_y)
+    seg_y    = detrend(seg_y, type='linear')   # removes mean and linear trend
     windowed = seg_y * np.hanning(len(seg_y))
 
     n     = len(windowed)
@@ -155,8 +155,6 @@ def annotate_fft_peaks(ax_f, freqs, power, color, n_peaks=3):
     color  : str
     n_peaks: int
     """
-    from scipy.signal import find_peaks
-
     mask     = freqs >= 0.05
     f_m      = freqs[mask]
     p_m      = power[mask]
@@ -239,8 +237,6 @@ def fit_model_to_segment(x_seg, y_seg, model_fn, p0_fn):
     -------
     dict with popt, y_fit, r2, success, error
     """
-    from scipy.optimize import curve_fit
-
     try:
         p0      = p0_fn(x_seg, y_seg)
         popt, _ = curve_fit(model_fn, x_seg, y_seg, p0=p0, maxfev=10000)

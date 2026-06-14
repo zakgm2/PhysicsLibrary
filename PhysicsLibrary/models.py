@@ -1,21 +1,32 @@
+"""
+models.py
+---------
+Parametric model functions for curve fitting via scipy.optimize.curve_fit.
+
+Each function follows the signature  f(x, *params) -> y  so they can be
+passed directly to fit_model_to_segment in analysis.py.
+"""
+
 import numpy as np
 
 
-def visibility_model(beta, A, V, beta_c, Period):
+def visibility_model(beta, a, v, beta_c, period):
     """
+    Photon-entanglement visibility model.
+
     Parameters
     ----------
-    beta   : Angle of the polarizer
-    A      : Amplitude of the sinusoid
-    V      : Visibility
-    beta_c : Center or angular shift
-    Period : Period of the wave
+    beta   : array  Polarizer angle (degrees or radians)
+    a      : float  Amplitude of the sinusoid
+    v      : float  Visibility (0–1)
+    beta_c : float  Angular offset / centre
+    period : float  Period of the oscillation
 
     Returns
     -------
-    Model for visibility of photon entanglement
+    array
     """
-    return (A / 2) * (1 - V * np.sin((beta - beta_c) / Period))
+    return (a / 2) * (1 - v * np.sin((beta - beta_c) / period))
 
 
 def double_exponential_model(x, a, b, c, d, k):

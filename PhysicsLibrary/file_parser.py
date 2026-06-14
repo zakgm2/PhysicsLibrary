@@ -26,7 +26,7 @@ from tkinter import filedialog
 from typing import Optional
 
 import numpy as np
-from PhysicsLibrary import processing_TDT
+from . import processing_TDT
 
 
 # ---------------------------------------------------------------------------

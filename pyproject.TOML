@@ -7,7 +7,7 @@ name = "PhysicsLibrary"
 version = "1.1.0"
 description = "Data processing library for Physics"
 requires-python = ">=3.10"
-readme = README.md
+readme = "README.md"
 
 [tool.setuptools.packages.find]
 where = ["."]
