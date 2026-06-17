@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "PhysicsLibrary"
-version = "1.1.0"
+version = "1.2.0"
 description = "Data processing library for Physics"
 requires-python = ">=3.10"
 readme = "README.md"
@@ -37,4 +37,11 @@ Version 1.1.0:
   - Rect-select zoom no longer accidentally triggers a curve fit click on release.
   - Oxysoft hover snap now correctly targets mean lines (O2Hb, HHb, tHb) by linewidth filter.
   - Edit Attributes changes now persist correctly across all view interactions (zoom, pan, hover).
+
+Version 1.2.0:
+  New features:
+  - load_pt2(): Terranova Prospa .pt2 EFNMR/MRI image parser added to file_parser_generic.py.
+    Detects magnitude image data after the LAER marker, supports all square power-of-two sizes
+    (16x16 through 256x256) with a perfect-square fallback.
+  - Exported load_pt2 from the top-level PhysicsLibrary package.
 """

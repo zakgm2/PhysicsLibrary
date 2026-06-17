@@ -4,7 +4,7 @@ PhysicsLibrary
 Data processing and analysis library for Physics Analysis GUI.
 """
 
-from .file_parser_generic import load_any_file
+from .file_parser_generic import load_any_file, load_pt2
 
 from .file_parser import (
     choose_file,
