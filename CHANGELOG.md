@@ -2,6 +2,13 @@
 
 ---
 
+## Version 1.2.1:
+  Refactor:
+  - Moved load_pt2() from file_parser_generic.py into file_parser.py where it belongs
+    alongside TDT and Oxysoft parsers. Public API unchanged.
+
+---
+
 ## Version 1.2.0:
   New features:
   - load_pt2(): Terranova Prospa .pt2 EFNMR/MRI image parser added to file_parser_generic.py.
