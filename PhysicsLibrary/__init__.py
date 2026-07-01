@@ -4,6 +4,13 @@ PhysicsLibrary
 Data processing and analysis library for Physics Analysis GUI.
 """
 
+from importlib.metadata import version as _version, PackageNotFoundError
+
+try:
+    __version__ = _version("PhysicsLibrary")
+except PackageNotFoundError:
+    __version__ = "unknown"
+
 from .file_parser_generic import load_any_file
 
 from .dataset import (
