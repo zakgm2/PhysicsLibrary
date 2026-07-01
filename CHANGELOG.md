@@ -2,6 +2,14 @@
 
 ---
 
+## Version 1.2.2:
+  Packaging:
+  - Fixed the PyPI package name in pyproject.toml (was "PhysicsLibrary", registered trusted
+    publisher is "ZaksPhysicsLibrary") — this mismatch caused the GitHub Actions trusted
+    publishing OIDC exchange to fail on upload. No code changes.
+
+---
+
 ## Version 1.2.1:
   Refactor:
   - Moved load_pt2() from file_parser_generic.py into file_parser.py where it belongs
