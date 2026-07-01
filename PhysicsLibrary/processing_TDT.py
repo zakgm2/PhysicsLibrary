@@ -1,8 +1,19 @@
-import tdt
+"""
+processing_TDT.py
+-----------------
+Signal processing pipeline for TDT (Tucker-Davis Technologies) fibre photometry data.
+
+Handles loading, bleaching correction, denoising, and event marker extraction.
+Depends on the `tdt` Python SDK for reading tank files.
+"""
+
+import os
+
 import numpy as np
 from scipy.optimize import curve_fit
 from scipy.signal import butter, filtfilt
-import os
+import tdt
+
 from .models import double_exponential_model as double_exponential
 
 
@@ -194,6 +205,12 @@ def correct_bleaching(y, fs):
                             bounds=(lower, upper), maxfev=10000)
         trend = double_exponential(x, *popt)
     except Exception:
+        # curve_fit failed — fall back to log-linear fit as a rough trend estimate
+        import warnings
+        warnings.warn(
+            "correct_bleaching: double-exponential fit failed; falling back to log-linear trend.",
+            RuntimeWarning, stacklevel=2,
+        )
         coeffs = np.polyfit(x_fit, np.log(np.maximum(y_fit, 1e-6)), 1)
         trend  = np.exp(np.polyval(coeffs, x))
 
@@ -219,6 +236,7 @@ def get_event_markers(data):
     notes  = data.epocs.Note.notes
     onsets = data.epocs.Note.onset
 
+    # Experiment-specific label→colour mapping; unknown labels default to black.
     color_map = {'Clap': 'red', 'Sucrose': 'green', 'Stop': 'blue'}
     markers   = []
 

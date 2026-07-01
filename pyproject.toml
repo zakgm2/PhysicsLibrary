@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "PhysicsLibrary"
+version = "1.2.1"
+description = "Data processing and analysis library for TDT, Oxysoft NIRS, and Terranova EFNMR lab data"
+requires-python = ">=3.10"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "zakgm2" },
+]
+keywords = ["physics", "neuroscience", "fibre-photometry", "NIRS", "TDT", "EFNMR", "signal-processing"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = [
+    "numpy",
+    "scipy",
+    "tdt",
+]
+
+[project.urls]
+Homepage = "https://github.com/zakgm2/PhysicsLibrary"
+Repository = "https://github.com/zakgm2/PhysicsLibrary"
+Changelog = "https://github.com/zakgm2/PhysicsLibrary/blob/main/CHANGELOG.md"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["PhysicsLibrary*"]
