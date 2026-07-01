@@ -6,16 +6,20 @@ Data processing and analysis library for Physics Analysis GUI.
 
 from .file_parser_generic import load_any_file
 
-from .file_parser import (
+from .dataset import (
     choose_file,
     detect_format,
     detect_format_file,
-    load_dataset,
-    load_dataset_file,
-    load_pt2,
     DataFormat,
     Dataset,
 )
+
+from .file_parser import (
+    load_dataset,
+    load_dataset_file,
+)
+
+from .loaders.pt2_loader import load_pt2
 
 from .processing_TDT import (
     process_tdt_folder,
