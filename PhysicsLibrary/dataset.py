@@ -2,8 +2,8 @@
 dataset.py
 ----------
 The universal Dataset container returned by every loader, plus format
-detection and folder selection. No parsing logic lives here — that's in
-loaders/.
+detection. No parsing logic lives here — that's in loaders/. No GUI
+concerns either — folder/file selection is a caller responsibility.
 """
 
 from __future__ import annotations
@@ -11,31 +11,9 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from tkinter import filedialog
 from typing import Optional
 
 import numpy as np
-
-
-# ---------------------------------------------------------------------------
-# Folder selection
-# ---------------------------------------------------------------------------
-
-def choose_file(parent_window=None) -> tuple[Optional[str], Optional[str]]:
-    """
-    Opens a native folder selection dialog.
-
-    Returns
-    -------
-    (folder_path, folder_name)  or  (None, None) if cancelled.
-    """
-    folder_path = filedialog.askdirectory(
-        parent=parent_window,
-        title="Open Lab Data Folder",
-    )
-    if not folder_path:
-        return None, None
-    return folder_path, os.path.basename(folder_path)
 
 
 # ---------------------------------------------------------------------------

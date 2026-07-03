@@ -118,6 +118,30 @@ def get_tdt_struct(path):
     """
     Load a Tucker-Davis Technologies (TDT) recording block.
 
+    Streams and scalars are read in a single call (unaffected by the issue
+    below). Epoc stores are auto-discovered from the block's own headers
+    and then read ONE STORE AT A TIME, each with its own fresh
+    tdt.read_block() call:
+
+    - The `tdt` SDK has a bug where reading multiple epoc stores together
+      breaks if any store has a mismatched onset/offset count (e.g. a
+      strobe/epoch that was still active when the recording was stopped —
+      a completely normal way for a session to end). Reading one store per
+      call sidesteps it; a store that still fails to a genuine data issue
+      is skipped with a warning rather than crashing the entire load.
+    - Store names must come from each store's own `.name` attribute, not
+      the header dict's key — TDT sanitizes store codes containing `/`
+      into a trailing-underscore Python attribute name (e.g. dict key
+      "EE1_" but the real store code passed to `store=` is "EE1/").
+    - Epoc reads must NOT reuse the cached `headers=` object from the
+      initial header scan — doing so carries over the same mismatched
+      onset/offset state that causes the crash in the first place. Only
+      the streams/scalars read benefits from header reuse.
+
+    This entirely auto-discovers whatever stores a given recording
+    contains — nothing about store names/types is hardcoded, so it works
+    for any TDT block regardless of how it was configured in Synapse.
+
     Parameters
     ----------
     path : str
@@ -126,11 +150,36 @@ def get_tdt_struct(path):
     Returns
     -------
     object
-        Parsed TDT data structure.
+        Parsed TDT data structure (data.streams, data.epocs, data.scalars).
     """
-    data = tdt.read_block(path)
+    import warnings
+
+    heads = tdt.read_block(path, headers=1)
+    if heads is None:
+        raise Exception("TDT returned an empty object.")
+
+    data = tdt.read_block(path, headers=heads, evtype=['streams', 'scalars'], verbose=0)
     if data is None:
         raise Exception("TDT returned an empty object.")
+
+    epoc_stores = [(key, s.name) for key, s in heads.stores.items()
+                   if getattr(s, 'type_str', None) == 'epocs']
+
+    for key, real_name in epoc_stores:
+        try:
+            # No headers= reuse here — see docstring.
+            ep = tdt.read_block(path, store=real_name, evtype=['epocs'], verbose=0)
+        except Exception as e:
+            warnings.warn(
+                f"Skipping epoc store '{key}' ({real_name}): {e}",
+                RuntimeWarning, stacklevel=2,
+            )
+            continue
+        if not ep.epocs:
+            continue
+        store_key = next(iter(ep.epocs.keys()))
+        setattr(data.epocs, key, ep.epocs[store_key])
+
     return data
 
 
@@ -220,34 +269,75 @@ def correct_bleaching(y, fs):
 
 def get_event_markers(data):
     """
-    Extract behavioral event markers from TDT epoc data.
+    Extract behavioral event markers from every populated TDT epoc store.
+
+    A recording can easily have a dozen+ epoc stores (I/O strobes, Epoch
+    Event Storage, free-text notes, a 1-second Tick reference, ...) —
+    every one of them becomes its own marker group here, tagged by store
+    name via the 'store' key, so a caller (e.g. a GUI) can let the user
+    toggle each store's markers independently instead of dumping every
+    store onto the plot at once (which overlaps into an unreadable mess).
+
+    The 'Note' store keeps its original behaviour: each onset becomes a
+    marker labeled with the actual note text (from Notes.txt), since
+    that's the one store meant for free-text annotations. Every other
+    epoc store gets one marker per onset event, labeled with the store
+    name.
+
+    Nothing about which stores exist is hardcoded — this walks whatever
+    data.epocs actually contains, so it works for any TDT block.
 
     Returns
     -------
     list of dict
         Each dict contains:
-        - time
-        - label
-        - color
+        - time  : float
+        - label : str
+        - color : str
+        - store : str  (source epoc store name, for grouping/toggling)
     """
-    if not hasattr(data.epocs, 'Note'):
+    if not hasattr(data, 'epocs'):
         return []
 
-    notes  = data.epocs.Note.notes
-    onsets = data.epocs.Note.onset
+    # Experiment-specific label→colour mapping for Note text; every other
+    # store cycles through a fixed palette so each store gets a distinct,
+    # consistent colour across redraws.
+    note_color_map = {'Clap': 'red', 'Sucrose': 'green', 'Stop': 'blue'}
+    palette = ['black', 'purple', 'orange', 'saddlebrown', 'teal', 'magenta',
+               'darkgreen', 'navy', 'gray', 'olive']
 
-    # Experiment-specific label→colour mapping; unknown labels default to black.
-    color_map = {'Clap': 'red', 'Sucrose': 'green', 'Stop': 'blue'}
-    markers   = []
+    markers = []
+    store_keys = sorted(k for k in data.epocs.keys())
 
-    for n, t in zip(notes, onsets):
-        note_str = n.decode() if isinstance(n, bytes) else str(n)
-        note_str = note_str.strip()
-        markers.append({
-            'time':  t,
-            'label': note_str,
-            'color': color_map.get(note_str, 'black'),
-        })
+    for i, store_key in enumerate(store_keys):
+        epoc = data.epocs[store_key]
+        onsets = getattr(epoc, 'onset', [])
+        if len(onsets) == 0:
+            continue
+
+        display_name = store_key.rstrip('_')  # cosmetic: TDT pads slash-containing codes with a trailing "_"
+
+        if store_key == 'Note':
+            notes = getattr(epoc, 'notes', [])
+            for n, t in zip(notes, onsets):
+                note_str = n.decode() if isinstance(n, bytes) else str(n)
+                note_str = note_str.strip()
+                markers.append({
+                    'time':  float(t),
+                    'label': note_str,
+                    'color': note_color_map.get(note_str, 'black'),
+                    'store': display_name,
+                })
+        else:
+            color = palette[i % len(palette)]
+            for t in onsets:
+                markers.append({
+                    'time':  float(t),
+                    'label': display_name,
+                    'color': color,
+                    'store': display_name,
+                })
+
     return markers
 
 

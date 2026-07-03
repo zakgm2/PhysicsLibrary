@@ -2,6 +2,39 @@
 
 ---
 
+## Version 1.3.0:
+  New:
+  - get_event_markers() now extracts markers from every populated epoc store in a TDT
+    recording, not just 'Note' — I/O strobes (PP1/PP2/EE1/EE2/Pmp/Tne/ShK), Epoch Event
+    Storage stores (L1P/L2P/L1E/L2E/pump/Tne), and the Tick reference all become their own
+    marker group. Each marker dict now includes a 'store' key so a caller (e.g. a GUI) can
+    group/toggle markers by source store instead of showing every store at once. Nothing
+    about which stores exist is hardcoded — this walks whatever data.epocs actually
+    contains, so it works for any TDT block regardless of Synapse configuration.
+  - get_zscore_slice() and compute_fft_slice() now accept optional pre/post parameters for
+    an asymmetric window around an event (e.g. 10s before, 20s after), instead of only a
+    symmetric total `window` split evenly. `window` is still supported and used as the
+    default if pre/post aren't given. get_zscore_slice()'s baseline is now computed from
+    the actual pre-event portion of the segment rather than "the first half," since those
+    differ once pre != post.
+
+  Bug fixes:
+  - Fixed get_tdt_struct() crashing (IndexError from inside the tdt SDK) on recordings
+    where any epoc store has a mismatched onset/offset count — e.g. a strobe/epoch that
+    was still active when the recording was stopped, a completely normal way for a session
+    to end. Root cause: the tdt SDK breaks when reading multiple epoc stores in one call if
+    any of them has this mismatch. Fixed by reading each epoc store with its own
+    tdt.read_block() call (which correctly reconstructs the missing offset) instead of
+    batching them; any store that still fails on its own (a genuine data issue, not this
+    bug) is skipped with a warning instead of crashing the whole load.
+
+  Cleanup:
+  - Removed dataset.choose_file() (and its tkinter dependency) — a GUI file-dialog concern
+    that had no business in a data-processing library, and was unused by any caller (the
+    Qt GUI opens its own QFileDialog directly). No replacement needed.
+
+---
+
 ## Version 1.2.2:
   Packaging:
   - Fixed the PyPI package name in pyproject.toml (was "PhysicsLibrary", registered trusted
