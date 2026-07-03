@@ -14,9 +14,14 @@ from scipy.signal import detrend, find_peaks
 from scipy.optimize import curve_fit
 
 
-def get_zscore_slice(time_array, signal, center_t, window=30):
+def get_zscore_slice(time_array, signal, center_t, window=None, pre=None, post=None):
     """
     Extract and z-score a time window around an event.
+
+    Supports either a symmetric `window` (split evenly before/after
+    center_t, legacy behaviour) or an asymmetric `pre`/`post` pair — e.g.
+    10s before the event and 20s after. If pre/post are given they take
+    precedence over window.
 
     Parameters
     ----------
@@ -24,16 +29,25 @@ def get_zscore_slice(time_array, signal, center_t, window=30):
     signal : array
     center_t : float
         Event time in seconds
-    window : float
-        Total window size in seconds
+    window : float or None
+        Total window size in seconds, split evenly before/after center_t.
+        Ignored if pre/post are given.
+    pre : float or None
+        Seconds before center_t to include. Defaults to window/2.
+    post : float or None
+        Seconds after center_t to include. Defaults to window/2.
 
     Returns
     -------
     (time segment, z-scored signal)
     """
-    half_win  = window / 2
-    start_idx = np.searchsorted(time_array, center_t - half_win)
-    end_idx   = np.searchsorted(time_array, center_t + half_win)
+    if pre is None or post is None:
+        half_win = (window if window is not None else 30) / 2
+        pre  = pre  if pre  is not None else half_win
+        post = post if post is not None else half_win
+
+    start_idx = np.searchsorted(time_array, center_t - pre)
+    end_idx   = np.searchsorted(time_array, center_t + post)
 
     seg_y = signal[start_idx:end_idx]
     seg_x = time_array[start_idx:end_idx]
@@ -41,8 +55,11 @@ def get_zscore_slice(time_array, signal, center_t, window=30):
     # Clip extreme artefacts before z-scoring so outliers don't dominate the baseline std.
     seg_y = np.clip(seg_y, -5, 5)
 
-    baseline_end    = len(seg_y) // 2
-    baseline_period = seg_y[:baseline_end]
+    # Baseline is the pre-event portion — the part of the window that
+    # actually precedes the event, not just "the first half of the segment"
+    # (those differ once pre != post).
+    baseline_mask   = seg_x < center_t
+    baseline_period = seg_y[baseline_mask] if baseline_mask.any() else seg_y
     mu  = np.mean(baseline_period)
     std = np.std(baseline_period)
 
@@ -95,13 +112,17 @@ def bin_for_heatmap(z_seg, num_bins=300):
     return np.array([np.mean(z_seg[bin_edges[i]:bin_edges[i+1]]) for i in range(num_bins)])
 
 
-def compute_fft_slice(time_array, signal, center_t, fs, window=30):
+def compute_fft_slice(time_array, signal, center_t, fs, window=None, pre=None, post=None):
     """
     Extract a time window around center_t and compute its FFT.
 
     Applies mean removal and linear detrending before FFT to eliminate
     the DC spike and slow drift, making physiological frequencies
     (breathing ~0.3 Hz, heart rate ~1 Hz) visible.
+
+    Supports either a symmetric `window` (split evenly before/after
+    center_t, legacy behaviour) or an asymmetric `pre`/`post` pair. If
+    pre/post are given they take precedence over window.
 
     Parameters
     ----------
@@ -111,8 +132,13 @@ def compute_fft_slice(time_array, signal, center_t, fs, window=30):
         Center time in seconds
     fs : float
         Sampling frequency in Hz
-    window : float
-        Total window size in seconds
+    window : float or None
+        Total window size in seconds, split evenly before/after center_t.
+        Ignored if pre/post are given.
+    pre : float or None
+        Seconds before center_t to include. Defaults to window/2.
+    post : float or None
+        Seconds after center_t to include. Defaults to window/2.
 
     Returns
     -------
@@ -121,9 +147,13 @@ def compute_fft_slice(time_array, signal, center_t, fs, window=30):
     seg_x : array
     seg_y : array
     """
-    half_win  = window / 2
-    start_idx = np.searchsorted(time_array, center_t - half_win)
-    end_idx   = np.searchsorted(time_array, center_t + half_win)
+    if pre is None or post is None:
+        half_win = (window if window is not None else 30) / 2
+        pre  = pre  if pre  is not None else half_win
+        post = post if post is not None else half_win
+
+    start_idx = np.searchsorted(time_array, center_t - pre)
+    end_idx   = np.searchsorted(time_array, center_t + post)
 
     seg_y = signal[start_idx:end_idx]
     seg_x = time_array[start_idx:end_idx]
