@@ -2,6 +2,19 @@
 
 ---
 
+## Version 1.4.0:
+  New:
+  - get_event_markers() now emits both edges of every epoc's state — onset ("high") and
+    offset ("low") — tagged with a new 'phase' key, instead of only onset. A pump or light's
+    on-duration needs both edges; something like a lever press usually only needs the
+    onset, so a caller now gets to choose per store instead of the library deciding for it.
+    The 'Note' store is unaffected — its markers are instantaneous free-text annotations,
+    not a state with a duration, so they never get a 'phase' key. Offsets still equal to
+    infinity (a strobe/epoch still active when the recording was stopped) are skipped, since
+    there's no real timestamp there.
+
+---
+
 ## Version 1.3.0:
   New:
   - get_event_markers() now extracts markers from every populated epoc store in a TDT

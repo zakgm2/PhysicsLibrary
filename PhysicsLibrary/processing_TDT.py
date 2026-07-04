@@ -278,10 +278,19 @@ def get_event_markers(data):
     toggle each store's markers independently instead of dumping every
     store onto the plot at once (which overlaps into an unreadable mess).
 
+    Every epoc is a state that goes high (onset) and later low (offset) —
+    for a lever press that's press/release, for a pump or light that's
+    on/off. Both are emitted here, each tagged with a 'phase' key ('high'
+    for onset, 'low' for offset), so a caller can decide per store whether
+    it cares about both edges (e.g. how long the pump ran) or only one
+    (e.g. just the press, not the release) instead of that decision being
+    baked into the library.
+
     The 'Note' store keeps its original behaviour: each onset becomes a
-    marker labeled with the actual note text (from Notes.txt), since
-    that's the one store meant for free-text annotations. Every other
-    epoc store gets one marker per onset event, labeled with the store
+    marker labeled with the actual note text (from Notes.txt), and has no
+    offset/'low' marker — free-text annotations are instantaneous, not a
+    state with a duration. Every other epoc store gets one 'high' marker
+    per onset and one 'low' marker per offset, both labeled with the store
     name.
 
     Nothing about which stores exist is hardcoded — this walks whatever
@@ -294,7 +303,8 @@ def get_event_markers(data):
         - time  : float
         - label : str
         - color : str
-        - store : str  (source epoc store name, for grouping/toggling)
+        - store : str   (source epoc store name, for grouping/toggling)
+        - phase : str   ('high'=onset, 'low'=offset; omitted for Note markers)
     """
     if not hasattr(data, 'epocs'):
         return []
@@ -336,6 +346,20 @@ def get_event_markers(data):
                     'label': display_name,
                     'color': color,
                     'store': display_name,
+                    'phase': 'high',
+                })
+            offsets = getattr(epoc, 'offset', [])
+            for t in offsets:
+                # TDT represents a strobe still active at recording end with
+                # offset=inf — not a real timestamp, nothing to plot.
+                if not np.isfinite(t):
+                    continue
+                markers.append({
+                    'time':  float(t),
+                    'label': display_name,
+                    'color': color,
+                    'store': display_name,
+                    'phase': 'low',
                 })
 
     return markers
