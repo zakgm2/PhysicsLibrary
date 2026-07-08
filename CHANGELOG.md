@@ -2,6 +2,38 @@
 
 ---
 
+## Version 1.5.0:
+  New:
+  - text_field_study.py: a domain-agnostic pipeline for a study where each subject produces
+    one JSON file with several free-text fields, letting a caller pick any pair of fields to
+    compare directly (e.g. does the answer to one question track another for the same
+    subject) — nothing about which fields exist or which pairs to compare is hardcoded.
+    run_field_study_pipeline() is the one-call entry point: loads every file matching a glob
+    pattern in a folder into a DataFrame, flags (never drops) near-empty responses as a data
+    quality signal, embeds only the fields actually referenced by a comparison or delta pair
+    with a sentence-transformers model, optionally computes a delta-vector magnitude between
+    two fields, and optionally computes per-pair cosine similarity for each subject plus a
+    permutation test (p-value, effect size) of whether same-subject similarity beats a
+    shuffled-pairing null, and a word-count-vs-similarity confound check. peek_fields() reads
+    just the field names out of a folder's first file so a caller can show a user their
+    actual fields before picking which to compare.
+  - field_study_validation.py: statistical validation for the paired-similarity metric above.
+    run_validation_pipeline() (or build_validation_summary() if you already have similarity
+    results) produces one row per field pair: a permutation-test p-value (with
+    Benjamini-Hochberg FDR correction across every pair tested together), Cohen's d effect
+    size against the pooled null distribution, an OLS regression of similarity on both
+    fields' word counts (statsmodels — checks whether the effect is just a "longer answers
+    look more similar" artifact), a bootstrap 95% confidence interval on the mean similarity,
+    and a leave-one-out sensitivity check flagging any subject whose removal shifts the mean
+    by more than one standard deviation of the leave-one-out distribution. Every function's
+    docstring explains what its statistic means, not just how to call it. Every one of these
+    functions returns NaN rather than crashing when there isn't enough data for a statistic
+    to be defined (e.g. a correlation needs at least 2 subjects) — a genuinely undefined
+    result, not an error.
+  - New dependencies: pandas, sentence-transformers, statsmodels.
+
+---
+
 ## Version 1.4.0:
   New:
   - get_event_markers() now emits both edges of every epoc's state — onset ("high") and

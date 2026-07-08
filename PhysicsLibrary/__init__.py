@@ -56,3 +56,25 @@ from .models import (
     gaussian_model,
     sinusoidal_model,
 )
+
+from .text_field_study import (
+    run_field_study_pipeline,
+    load_field_study_folder,
+    peek_fields,
+    flag_low_quality,
+    embed_text_fields,
+    compute_delta_vector,
+    compute_paired_similarity,
+    permutation_test_similarity,
+    wordcount_confound_check,
+)
+
+from .field_study_validation import (
+    run_validation_pipeline,
+    build_validation_summary,
+    cohens_d,
+    benjamini_hochberg,
+    wordcount_controlled_regression,
+    bootstrap_mean_ci,
+    leave_one_out_sensitivity,
+)

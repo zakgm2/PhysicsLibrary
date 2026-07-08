@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ZaksPhysicsLibrary"
-version = "1.4.0"
-description = "Data processing and analysis library for TDT, Oxysoft NIRS, and Terranova EFNMR lab data"
+version = "1.5.0"
+description = "Data processing and analysis library for TDT, Oxysoft NIRS, Terranova EFNMR lab data, and grouped-text-field studies"
 requires-python = ">=3.10"
 readme = "README.md"
 license = "MIT"
@@ -13,7 +13,7 @@ license-files = ["LICENSE"]
 authors = [
     { name = "zakgm2" },
 ]
-keywords = ["physics", "neuroscience", "fibre-photometry", "NIRS", "TDT", "EFNMR", "signal-processing"]
+keywords = ["physics", "neuroscience", "fibre-photometry", "NIRS", "TDT", "EFNMR", "signal-processing", "text-analysis", "nlp"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
@@ -27,6 +27,9 @@ dependencies = [
     "numpy",
     "scipy",
     "tdt",
+    "pandas",
+    "sentence-transformers",
+    "statsmodels",
 ]
 
 [project.urls]
