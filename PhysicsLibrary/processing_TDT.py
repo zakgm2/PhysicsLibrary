@@ -341,6 +341,16 @@ def get_event_markers(data):
         else:
             color = palette[i % len(palette)]
             for t in onsets:
+                # A level-type epoc store (buffered, tracks a logic
+                # signal's on/off state — common for some Synapse Gizmo
+                # outputs) has no history before recording starts; if its
+                # logic already happened to be high the instant recording
+                # began, TDT inserts a synthetic onset at exactly t=0 to
+                # represent that pre-existing state, not a real event.
+                # Mirrors the offset=inf guard below for the same store
+                # type's opposite edge case (still active at the end).
+                if t == 0.0:
+                    continue
                 markers.append({
                     'time':  float(t),
                     'label': display_name,

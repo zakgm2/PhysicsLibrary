@@ -69,6 +69,199 @@ def get_zscore_slice(time_array, signal, center_t, window=None, pre=None, post=N
     return seg_x, (seg_y - mu) / std
 
 
+def compute_event_zscore_peth(time_array, signal, event_times, pre, post, num_bins=300):
+    """
+    Z-score and align every occurrence of one event type into a
+    trial x time matrix, for a stacked-heatmap + trial-average PETH view
+    (GuPPy-style) rather than a single click-triggered PETH.
+
+    Each trial is z-scored independently against its own pre-event
+    baseline (see get_zscore_slice) — that's what makes a trial's
+    response comparable regardless of the signal's absolute level at
+    that point in the recording. Trials are then resampled onto one
+    shared relative-time axis (num_bins points spanning -pre..+post) so
+    they can be stacked into a single matrix despite each trial's raw
+    segment having a slightly different sample count from indexing
+    rounding.
+
+    Parameters
+    ----------
+    time_array : array
+    signal : array
+    event_times : list of float
+        Timestamps (same units as time_array) for every occurrence of
+        the event being analyzed.
+    pre, post : float
+        Seconds before/after each event to include.
+    num_bins : int
+        Number of points each trial is resampled to.
+
+    Returns
+    -------
+    dict with:
+        time_axis : array, shape (num_bins,) — relative time, -pre..+post
+        trial_matrix : array, shape (n_valid_trials, num_bins)
+        trial_event_times : list of the event_times that produced a
+            usable trial (too-short/edge-of-recording events are skipped)
+        mean_trace : array, shape (num_bins,)
+        sem_trace : array, shape (num_bins,) — standard error of the mean
+            across trials, zero if fewer than 2 trials
+    """
+    time_axis = np.linspace(-pre, post, num_bins)
+    rows = []
+    valid_times = []
+    for t in event_times:
+        seg_x, seg_z = get_zscore_slice(time_array, signal, t, pre=pre, post=post)
+        if seg_x is None or len(seg_x) < 2:
+            continue
+        rel_x = seg_x - t
+        rows.append(np.interp(time_axis, rel_x, seg_z))
+        valid_times.append(t)
+
+    if not rows:
+        empty = np.zeros(num_bins)
+        return {
+            "time_axis": time_axis, "trial_matrix": np.zeros((0, num_bins)),
+            "trial_event_times": [], "mean_trace": empty, "sem_trace": empty,
+        }
+
+    trial_matrix = np.array(rows)
+    mean_trace = trial_matrix.mean(axis=0)
+    if trial_matrix.shape[0] > 1:
+        sem_trace = trial_matrix.std(axis=0, ddof=1) / np.sqrt(trial_matrix.shape[0])
+    else:
+        sem_trace = np.zeros(num_bins)
+
+    return {
+        "time_axis": time_axis, "trial_matrix": trial_matrix,
+        "trial_event_times": valid_times, "mean_trace": mean_trace, "sem_trace": sem_trace,
+    }
+
+
+def find_significant_peaks(time_array, signal, z_threshold=2.5, min_distance_sec=1.0,
+                            include_troughs=False):
+    """
+    Auto-detect statistically significant transients directly from the
+    signal, rather than relying on externally-supplied event markers
+    (TDT epocs, manual markers, ...) that may not actually line up with
+    where the neural signal itself is doing something.
+
+    The whole recording is z-scored against its own global mean/std
+    (not a local baseline — this is a single-pass "how unusual is this
+    point relative to the entire recording" measure, not per-event), and
+    scipy.signal.find_peaks picks local maxima at or above z_threshold,
+    at least min_distance_sec apart so a single transient's rising edge
+    doesn't get counted as several peaks.
+
+    Parameters
+    ----------
+    time_array : array
+    signal : array
+        Already-processed signal (e.g. bleach-corrected + smoothed) —
+        this function does no filtering of its own.
+    z_threshold : float
+        Minimum z-score (standard deviations above the recording's own
+        mean) for a peak to count as "statistically significant".
+    min_distance_sec : float
+        Minimum spacing between detected peaks, in seconds.
+    include_troughs : bool
+        Also detect significant negative-going deflections (z <=
+        -z_threshold) — off by default since most fibre-photometry
+        analyses care about excitatory transients specifically.
+
+    Returns
+    -------
+    list of dict, each {"time": float, "z_score": float, "kind": "peak"|"trough"},
+    sorted by time.
+    """
+    fs = 1.0 / np.median(np.diff(time_array))
+    distance = max(1, int(min_distance_sec * fs))
+
+    mu, std = np.mean(signal), np.std(signal)
+    if std < 1e-9:
+        return []
+    z = (signal - mu) / std
+
+    results = []
+    peak_idx, _ = find_peaks(z, height=z_threshold, distance=distance)
+    for i in peak_idx:
+        results.append({"time": float(time_array[i]), "z_score": float(z[i]), "kind": "peak"})
+
+    if include_troughs:
+        trough_idx, _ = find_peaks(-z, height=z_threshold, distance=distance)
+        for i in trough_idx:
+            results.append({"time": float(time_array[i]), "z_score": float(z[i]), "kind": "trough"})
+
+    results.sort(key=lambda r: r["time"])
+    return results
+
+
+def find_peak_near_events(time_array, signal, event_times, pre, post,
+                           z_threshold=2.5, include_troughs=False):
+    """
+    Check whether a statistically significant peak actually shows up near
+    each given event time, rather than assuming the event marker itself
+    marks where the neural signal responds. Works for a single event
+    (event_times of length 1) or many occurrences of the same event type
+    (checking consistency across all of them).
+
+    Each event's window is baselined the same way as get_zscore_slice
+    (pre-event portion), so "significant" means relative to that event's
+    own local baseline, not the whole recording's.
+
+    Parameters
+    ----------
+    time_array : array
+    signal : array
+    event_times : list of float
+    pre, post : float
+        Seconds before/after each event to search within.
+    z_threshold : float
+        Minimum |z-score| within the window for a peak to count as found.
+    include_troughs : bool
+        Also consider negative-going deflections as candidate "peaks",
+        keeping whichever (peak or trough) is more extreme.
+
+    Returns
+    -------
+    list of dict, one per event_time (same order), each:
+        {"event_time": float, "found": bool, "peak_time": float or None,
+         "latency": float or None (peak_time - event_time),
+         "z_score": float or None, "kind": "peak"|"trough"|None}
+    "found" is False when the window was unusable (too close to the
+    recording's edges) or nothing in it reached z_threshold.
+    """
+    results = []
+    for t in event_times:
+        seg_x, seg_z = get_zscore_slice(time_array, signal, t, pre=pre, post=post)
+        if seg_x is None or len(seg_x) == 0:
+            results.append({"event_time": t, "found": False, "peak_time": None,
+                             "latency": None, "z_score": None, "kind": None})
+            continue
+
+        idx_max = int(np.argmax(seg_z))
+        if include_troughs:
+            idx_min = int(np.argmin(seg_z))
+            if abs(seg_z[idx_min]) > seg_z[idx_max]:
+                best_idx, kind = idx_min, "trough"
+            else:
+                best_idx, kind = idx_max, "peak"
+        else:
+            best_idx, kind = idx_max, "peak"
+
+        best_z = float(seg_z[best_idx])
+        found = abs(best_z) >= z_threshold
+        peak_time = float(seg_x[best_idx]) if found else None
+        results.append({
+            "event_time": t, "found": found,
+            "peak_time": peak_time,
+            "latency": (peak_time - t) if found else None,
+            "z_score": best_z if found else None,
+            "kind": kind if found else None,
+        })
+    return results
+
+
 def smooth_signal(data, fs, window_sec=0.5):
     """
     Moving average smoothing filter.

@@ -2,6 +2,31 @@
 
 ---
 
+## Version 1.6.0:
+  New:
+  - analysis.py: compute_event_zscore_peth(time_array, signal, event_times, pre, post, num_bins) —
+    Z-scores every occurrence of one event type against its own pre-event baseline and aligns
+    them into a trial x time matrix (plus mean/SEM traces), for a GuPPy-style stacked-heatmap
+    PETH rather than a single click-triggered one.
+  - analysis.py: find_significant_peaks(time_array, signal, z_threshold, min_distance_sec,
+    include_troughs) — z-scores the whole recording against its own global mean/std and returns
+    local peaks (scipy.signal.find_peaks) at or above threshold, for finding candidate events
+    directly from the signal rather than trusting externally-supplied event markers.
+  - analysis.py: find_peak_near_events(time_array, signal, event_times, pre, post, z_threshold,
+    include_troughs) — checks whether a statistically significant peak actually shows up near
+    each given event time (single event or many occurrences of one type), reporting found/
+    latency/z-score per event, so alignment between a marker and the real signal can be verified
+    rather than assumed.
+
+  Fixed:
+  - processing_TDT.py: get_event_markers() — a level/buffered-logic epoc store already "high"
+    the instant recording started got a spurious onset marker at exactly t=0 (TDT's synthetic
+    starting-state entry, since it has no signal history before t=0 — not a real event). Now
+    filtered out, mirroring the existing offset == inf guard for the opposite edge case (a
+    strobe still active at the recording's end).
+
+---
+
 ## Version 1.5.0:
   New:
   - text_field_study.py: a domain-agnostic pipeline for a study where each subject produces
