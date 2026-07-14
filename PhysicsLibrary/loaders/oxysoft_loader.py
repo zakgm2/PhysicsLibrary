@@ -88,6 +88,13 @@ def load_oxysoft_file(file_path: str) -> Dataset:
     """Parse a single Oxysoft .txt export into a Dataset."""
     folder_name = os.path.splitext(os.path.basename(file_path))[0]
     o2hb, hhb, events, metadata, ch_labels, sample_rate = _parse_oxysoft_txt(file_path)
+    if o2hb.ndim < 2 or o2hb.shape[0] == 0:
+        raise ValueError(
+            f"No O2Hb channels recognized in the Legend block of {os.path.basename(file_path)} — "
+            "this file's column labels don't match what this parser expects "
+            "(looks for 'O2Hb' in each Legend row's description). The file may use a "
+            "different Oxysoft export format/version than this parser was built against."
+        )
     n_ch, n_samp = o2hb.shape
     signals      = np.concatenate([o2hb, hhb], axis=0)
     return Dataset(

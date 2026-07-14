@@ -45,6 +45,14 @@ from .analysis import (
     annotate_fft_peaks,
     compute_slope_segment,
     fit_model_to_segment,
+    compute_event_zscore_peth,
+    find_significant_peaks,
+    find_peak_near_events,
+)
+
+from .splice import (
+    splice_keep_inside,
+    splice_cut_out,
 )
 
 from .models import (
