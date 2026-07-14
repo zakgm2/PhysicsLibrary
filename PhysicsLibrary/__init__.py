@@ -50,6 +50,11 @@ from .analysis import (
     find_peak_near_events,
 )
 
+from .splice import (
+    splice_keep_inside,
+    splice_cut_out,
+)
+
 from .models import (
     double_exponential_model,
     visibility_model,

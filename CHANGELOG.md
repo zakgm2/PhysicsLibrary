@@ -2,6 +2,24 @@
 
 ---
 
+## Version 1.7.0:
+  New:
+  - splice.py: splice_keep_inside(x, raw, corr, markers, detected_markers, start, end) and
+    splice_cut_out(x, raw, corr, markers, detected_markers, start, end) — non-destructive
+    time-range edits of a signal (trim to a range, or remove one and stitch the remainder back
+    together). cut_out shifts everything after the removed range backward by its duration so the
+    timeline stays contiguous — a gap in x would break any downstream analysis assuming uniform
+    sampling right at the cut boundary — and drops/shifts marker dicts to match. Pure array/dict
+    operations, no knowledge of any GUI's state shape.
+
+  Fixed:
+  - loaders/oxysoft_loader.py: load_oxysoft_file() failed with a cryptic
+    "not enough values to unpack (expected 2, got 1)" when a file's Legend block didn't match the
+    expected O2Hb/HHb column format (o2hb ended up shape (0,), a 1-tuple). Now raises a clear
+    ValueError naming the actual problem.
+
+---
+
 ## Version 1.6.0:
   New:
   - analysis.py: compute_event_zscore_peth(time_array, signal, event_times, pre, post, num_bins) —
