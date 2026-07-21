@@ -2,6 +2,18 @@
 
 ---
 
+## Version 1.8.0:
+  New:
+  - processing_TDT.py: debounce_events(times, min_isi) — collapses switch-bounce/double-tap
+    duplicate event timestamps (e.g. a lever registering more than one contact for what was
+    physically a single press) by sorting the timestamps and dropping anything within min_isi
+    seconds of the previous *kept* event. Independent of any fixed-ratio schedule (FR1, FR3, ...)
+    — it works on raw inter-event spacing, not an expected press count, and a min_isi comfortably
+    below the animal's real max press rate leaves genuinely fast consecutive presses (e.g. an FR3
+    burst) intact while still removing sub-threshold hardware bounce.
+
+---
+
 ## Version 1.7.0:
   New:
   - splice.py: splice_keep_inside(x, raw, corr, markers, detected_markers, start, end) and

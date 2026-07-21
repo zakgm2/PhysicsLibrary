@@ -145,7 +145,7 @@ Everything importable from `PhysicsLibrary` directly:
 |----------|-------|
 | Format detection | `detect_format`, `detect_format_file`, `DataFormat`, `Dataset` |
 | Loading | `load_dataset`, `load_dataset_file`, `load_any_file`, `load_pt2` |
-| TDT processing | `process_tdt_folder`, `validate_tdt_folder`, `get_tdt_struct`, `get_plot_data`, `correct_bleaching`, `denoise_signal`, `get_event_markers` |
+| TDT processing | `process_tdt_folder`, `validate_tdt_folder`, `get_tdt_struct`, `get_plot_data`, `correct_bleaching`, `denoise_signal`, `get_event_markers`, `debounce_events` |
 | Analysis | `get_zscore_slice`, `smooth_signal`, `bin_for_heatmap`, `compute_fft_slice`, `annotate_fft_peaks`, `compute_slope_segment`, `fit_model_to_segment` |
 | Curve fit models | `linear_model`, `single_exponential_model`, `exponential_rise_model`, `double_exponential_model`, `gaussian_model`, `sinusoidal_model`, `visibility_model` |
 | Text field study | `run_field_study_pipeline`, `load_field_study_folder`, `peek_fields`, `flag_low_quality`, `embed_text_fields`, `compute_delta_vector`, `compute_paired_similarity`, `permutation_test_similarity`, `wordcount_confound_check` |
