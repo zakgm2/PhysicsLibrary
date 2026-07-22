@@ -35,6 +35,7 @@ from .processing_TDT import (
     correct_bleaching,
     denoise_signal,
     get_event_markers,
+    debounce_events,
 )
 
 from .analysis import (

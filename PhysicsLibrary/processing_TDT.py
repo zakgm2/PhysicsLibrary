@@ -375,6 +375,42 @@ def get_event_markers(data):
     return markers
 
 
+def debounce_events(times, min_isi):
+    """
+    Collapse switch-bounce / double-tap duplicates out of a list of event
+    timestamps (e.g. lever-press onsets), independent of any fixed-ratio
+    schedule (FR1, FR3, ...).
+
+    A real lever contact and a bounce/duplicate reading of the same
+    physical press land within milliseconds of each other — far closer
+    than an animal can genuinely press again. Sorting the timestamps and
+    dropping anything within `min_isi` seconds of the last *kept* event
+    removes those duplicates while leaving genuinely fast consecutive
+    presses (e.g. during an FR3 burst) intact, as long as `min_isi` is
+    below the animal's real max press rate.
+
+    Parameters
+    ----------
+    times : sequence of float
+        Raw event timestamps, in seconds. Need not be sorted.
+    min_isi : float
+        Minimum inter-event interval, in seconds. Any event whose gap from
+        the previous kept event is smaller than this is dropped. The
+        first press of a bounce cluster is always the one kept.
+
+    Returns
+    -------
+    list of float
+        Sorted timestamps with sub-`min_isi` duplicates removed.
+    """
+    sorted_times = sorted(float(t) for t in times)
+    kept = []
+    for t in sorted_times:
+        if not kept or (t - kept[-1]) >= min_isi:
+            kept.append(t)
+    return kept
+
+
 def denoise_signal(signal, fs, cutoff=5, order=2):
     """
     Low-pass Butterworth filter for ΔF/F signals.
