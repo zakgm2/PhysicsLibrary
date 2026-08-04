@@ -2,6 +2,50 @@
 
 ---
 
+## Version 1.10.0:
+  New:
+  - process_tdt_folder() now returns "motion_correction_inlier_fraction": the fraction (0-1)
+    of samples RANSAC kept as inliers when fitting the 415-vs-465 motion correction line, or
+    None if there was no isosbestic reference stream to correct against. Lets a caller (e.g. the
+    GUI) show how much of the recording was judged to be motion artifact and excluded from the fit.
+
+  Changed:
+  - get_event_markers() now skips the 'Tick' epoc store entirely. It's TDT's own 1-second
+    heartbeat/reference signal, not a behavioral event — every recording has it, nothing ever
+    wants to plot/analyze/splice against it, and its regularity would otherwise flood every
+    marker and event-name picker a caller builds from this function's output.
+
+  Fixed:
+  - _robust_linear_fit()'s noise estimate (used to set RANSAC's residual_threshold) was based on
+    consecutive-sample differences, which measures noise at the timescale of one sample —
+    fine in principle, but at TDT's actual sampling rates (~1 kHz, adjacent samples ~1ms apart)
+    that's dominated by ADC/thermal noise far smaller than the residual scale a real 415-vs-465
+    regression produces once genuine biological signal is accounted for. Confirmed on a real
+    recording (PFC-GCaMP-Sucrose): diff-based noise estimation set a threshold ~350x tighter
+    than the fit's actual residual scale (OLS residual std ≈ 5.19 vs. a 0.0146 threshold),
+    rejecting 98% of samples as "outliers" — including essentially all real signal. Replaced
+    with the MAD of an initial OLS fit's own residuals, which is on the right scale by
+    construction and stays robust to the artifacts it's meant to exclude; same recording now
+    lands at ~95% inliers. (1.9.1's sqrt(2)/duplicate-scaling fix and this session's earlier
+    zero-diff guard were both correct fixes to the diff-based approach, but the approach itself
+    was the wrong tool at this sampling rate — this replaces it rather than patching further.)
+
+---
+
+## Version 1.9.1:
+  Fixed:
+  - processing_TDT.py: _robust_linear_fit()'s noise estimate (used to set RANSAC's
+    residual_threshold — see 1.9.0 below) applied the MAD-to-standard-deviation scale factor
+    twice (`/ 0.6745 * 1.4826`, where 1.4826 ≈ 1/0.6745), inflating the estimate by roughly 2x,
+    and never corrected for consecutive-sample differencing doubling the variance
+    (Var(y[i+1]-y[i]) = 2·Var(y) for independent samples) — so the residual threshold RANSAC
+    used was calibrated well above the recording's actual noise level, meaning it excluded fewer
+    genuine outliers than intended. Corrected to `MAD / (0.6745 * sqrt(2))` — each factor applied
+    exactly once. Verified against synthetic data with known noise: the old formula estimated
+    noise at roughly 2x the true level; the corrected one lands within ~2%.
+
+---
+
 ## Version 1.9.0:
   Changed:
   - processing_TDT.py: process_tdt_folder() now motion-corrects (regresses the isosbestic/415
