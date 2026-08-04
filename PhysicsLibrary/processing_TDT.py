@@ -21,43 +21,66 @@ from .models import double_exponential_model as double_exponential
 def _robust_linear_fit(x, y):
     """
     RANSAC robust linear regression: y = a*x + b.
+    
+    Motion correction regresses the isosbestic (415 nm) stream onto the signal 
+    (465 nm) stream. An ordinary least-squares fit (np.polyfit) lets the exact 
+    kind of thing this regression is meant to remove (a burst of motion 
+    artifact, a fiber-cord twist) drag the fitted line toward itself, 
+    corrupting the motion-free prediction everywhere else in the recording.
+    
+    RANSAC instead repeatedly fits a line to small random subsets, keeps 
+    whichever subset gets the most other points within residual_threshold of it 
+    (the inliers), and does one final fit on just those inliers. Points that 
+    never look like they belong to the same line (i.e., artifacts) are excluded 
+    from the fit entirely rather than merely downweighted.
+    
+    residual_threshold is set explicitly to 3x a robust noise estimate.
+    sklearn's own default (the MAD of y around its median) is calibrated for
+    roughly-flat data and comes out far too loose here, since y's spread is
+    dominated by the real 415-vs-465 trend rather than noise; left at the
+    default, RANSAC would accept every point as an inlier and silently
+    degrade to an ordinary least-squares fit.
 
-    Motion correction regresses the isosbestic (415 nm) stream onto the
-    signal (465 nm) stream — an ordinary least-squares fit (np.polyfit)
-    lets exactly the kind of thing this regression is meant to remove
-    (a burst of motion artifact, a fiber-cord twist) drag the fitted line
-    toward itself, corrupting the "motion-free" prediction everywhere
-    else in the recording, not just where the artifact happened. RANSAC
-    instead repeatedly fits a line to small random subsets, keeps whichever
-    subset gets the most other points within `residual_threshold` of it
-    (the "inliers"), and does one final fit on just those inliers — points
-    that never look like they belong to the same line (i.e. artifacts)
-    are excluded from the fit entirely rather than merely downweighted.
-
-    residual_threshold is set explicitly (3x a robust noise estimate) —
-    sklearn's own default (the MAD of y around its median) is calibrated
-    for roughly-flat data and comes out far too loose here, since y's
-    spread is dominated by the real 415-vs-465 trend rather than noise;
-    left at the default, RANSAC would accept every point as an inlier and
-    silently degrade to an ordinary least-squares fit, which is worse than
-    not using RANSAC at all — no error, just no actual robustness.
+    The noise estimate itself comes from the MAD of an initial ordinary
+    least-squares fit's residuals (not from consecutive-sample
+    differences, tried previously) — diff-based noise estimation
+    measures noise at the timescale of one sample, which at TDT's
+    sampling rates (~1 kHz, adjacent samples ~1ms apart) is dominated by
+    ADC/thermal noise far smaller than the residual scale a real
+    415-vs-465 regression actually produces once genuine biological
+    signal (the very thing this correction is meant to preserve, not
+    remove) is accounted for. Confirmed on a real recording: diff-based
+    noise estimation set a threshold ~350x tighter than the fit's actual
+    residual scale, rejecting 98% of samples as "outliers". MAD of the
+    OLS fit's own residuals is on the right scale by construction, and
+    stays robust to the artifacts it's meant to exclude — they're
+    exactly the kind of minority-of-points deviation MAD is insensitive
+    to, same reasoning as using MAD over standard deviation anywhere
+    else here.
 
     Returns
     -------
-    (a, b) : float
-        Slope and intercept.
+    (a, b, inlier_fraction) : float
+        Slope, intercept, and the fraction of points RANSAC kept as
+        inliers for the final fit (1.0 = every point used, same as an
+        ordinary least-squares fit would; lower means more of the
+        recording was judged to be motion artifact and excluded).
     """
-    # Consecutive-sample differences cancel out any slow trend, leaving
-    # (mostly) just noise — a standard robust noise-level estimator, scaled
-    # by 1.4826/0.6745 to make it comparable to a Gaussian standard
-    # deviation (the usual normalization for a median-absolute-deviation
-    # estimate) so "3x" reads the same way a 3-sigma threshold would.
-    noise_est = np.median(np.abs(np.diff(y))) / 0.6745 * 1.4826
+    ols_coeffs = np.polyfit(x, y, 1)
+    ols_resid = y - np.polyval(ols_coeffs, x)
+    # 0.6745 maps MAD to a Gaussian standard deviation.
+    noise_est = np.median(np.abs(ols_resid - np.median(ols_resid))) / 0.6745
+
+    # Set the threshold to 3x the robust noise estimate (equivalent to a 3-sigma bound)
     model = RANSACRegressor(residual_threshold=3 * noise_est, random_state=0)
     model.fit(x.reshape(-1, 1), y)
+
+    # Coerce to float to unpack single-element arrays safely
     a = float(model.estimator_.coef_[0])
     b = float(model.estimator_.intercept_)
-    return a, b
+    inlier_fraction = float(np.mean(model.inlier_mask_))
+
+    return a, b, inlier_fraction
 
 
 def validate_tdt_folder(path):
@@ -122,6 +145,9 @@ def process_tdt_folder(folder_path):
           too if a 415 reference stream exists) — the un-motion-corrected,
           un-normalized traces, for a caller that wants to plot/analyze
           one of them directly instead of only "raw"/"corr" above
+        - motion_correction_inlier_fraction: fraction (0-1) of samples
+          RANSAC kept as inliers during motion correction, or None if
+          there was no 415 reference stream to correct against
     """
     data_struct = get_tdt_struct(folder_path)
     streams = data_struct.streams.keys()
@@ -136,13 +162,14 @@ def process_tdt_folder(folder_path):
 
     if name_415:
         _, y_415, _ = get_plot_data(data_struct, name_415)
-        a, b = _robust_linear_fit(y_415, y_465)
+        a, b, inlier_fraction = _robust_linear_fit(y_415, y_465)
         y_fit = a * y_415 + b
         y_final = y_465 - y_fit
         display_name = f"Corrected {name_465} (via {name_415})"
     else:
         y_final = y_465
         display_name = f"{name_465} (Uncorrected)"
+        inlier_fraction = None
 
     _, trend = correct_bleaching(y_final, fs)
 
@@ -173,6 +200,7 @@ def process_tdt_folder(folder_path):
         "store":    display_name,
         "markers":  get_event_markers(data_struct),
         "channels": channels,
+        "motion_correction_inlier_fraction": inlier_fraction,
     }
 
 
@@ -334,11 +362,13 @@ def get_event_markers(data):
     Extract behavioral event markers from every populated TDT epoc store.
 
     A recording can easily have a dozen+ epoc stores (I/O strobes, Epoch
-    Event Storage, free-text notes, a 1-second Tick reference, ...) —
-    every one of them becomes its own marker group here, tagged by store
-    name via the 'store' key, so a caller (e.g. a GUI) can let the user
-    toggle each store's markers independently instead of dumping every
-    store onto the plot at once (which overlaps into an unreadable mess).
+    Event Storage, free-text notes, ...) — every one of them becomes its
+    own marker group here, tagged by store name via the 'store' key, so
+    a caller (e.g. a GUI) can let the user toggle each store's markers
+    independently instead of dumping every store onto the plot at once
+    (which overlaps into an unreadable mess). The one exception is the
+    'Tick' store — TDT's own 1-second heartbeat/reference signal, not a
+    behavioral event — which is skipped entirely.
 
     Every epoc is a state that goes high (onset) and later low (offset) —
     for a lever press that's press/release, for a pump or light that's
@@ -382,12 +412,19 @@ def get_event_markers(data):
     store_keys = sorted(k for k in data.epocs.keys())
 
     for i, store_key in enumerate(store_keys):
+        display_name = store_key.rstrip('_')  # cosmetic: TDT pads slash-containing codes with a trailing "_"
+        if display_name.lower() == 'tick':
+            # TDT's own 1-second heartbeat/reference signal, not a
+            # behavioral event — every recording has it, it's never
+            # something a caller wants to plot, analyze, or splice
+            # against, and its sheer regularity would otherwise flood
+            # every marker/event picker in the GUI.
+            continue
+
         epoc = data.epocs[store_key]
         onsets = getattr(epoc, 'onset', [])
         if len(onsets) == 0:
             continue
-
-        display_name = store_key.rstrip('_')  # cosmetic: TDT pads slash-containing codes with a trailing "_"
 
         if store_key == 'Note':
             notes = getattr(epoc, 'notes', [])
