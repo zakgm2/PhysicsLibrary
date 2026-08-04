@@ -2,6 +2,45 @@
 
 ---
 
+## Version 1.9.0:
+  Changed:
+  - processing_TDT.py: process_tdt_folder() now motion-corrects (regresses the isosbestic/415
+    stream onto the signal/465 stream) with RANSAC robust regression (sklearn's
+    RANSACRegressor) instead of ordinary least squares (np.polyfit). OLS lets exactly the kind
+    of thing this regression exists to remove — a burst of motion artifact, a fiber-cord twist —
+    drag the fitted line toward itself, corrupting the "motion-free" prediction across the whole
+    recording rather than just where the artifact happened; RANSAC instead fits to random small
+    subsets, keeps whichever gets the most points within a residual threshold ("inliers"), and
+    does one final fit on just those — points that never look like they belong to the same line
+    are excluded from the fit entirely, not merely downweighted. The residual threshold is set
+    explicitly (3x a robust noise estimate from consecutive-sample differences) since sklearn's
+    own default is calibrated for roughly-flat data and comes out far too loose here (y's spread
+    is dominated by the real 415-vs-465 trend, not noise) — left at the default, RANSAC would
+    accept every point as an inlier and silently degrade to a plain OLS fit. Verified against
+    synthetic data with an injected outlier burst: recovers the true slope/intercept almost
+    exactly where OLS was measurably pulled off, and against a real recording with a
+    poorly-conditioned 415/465 relationship (OLS previously threw `RankWarning: Polyfit may be
+    poorly conditioned`) where the bleaching-trend baseline that depends on this fit went from
+    swinging across 6 orders of magnitude (0.5 to 117,177 — a failed fit) to a tight, sane 0.49–0.88
+    range. New dependency: scikit-learn (was already present transitively via
+    sentence-transformers, now declared explicitly). This changes dF/F output values for every
+    TDT recording that has an isosbestic reference stream — not a bug fix to a wrong number, but
+    a real change in which regression method computes it.
+  New:
+  - processing_TDT.py: process_tdt_folder() now also returns "channels" — a list of
+    {"key", "label", "y"} for each raw per-wavelength stream found (always "main_driver",
+    plus "isosbestic" too if a 415 reference stream exists), the un-motion-corrected,
+    un-normalized traces. Lets a caller plot/analyze the isosbestic control or the main
+    driver/probe channel directly instead of only the final "raw"/"corr" result. Nothing about
+    stream naming or count is hardcoded beyond the existing 465/415 detection, so a recording
+    with no isosbestic stream simply has no "isosbestic" entry — still works.
+  - splice.py: splice_keep_inside()/splice_cut_out() take an optional extra_channels dict of
+    {name: array} — any other arrays sample-aligned with x (e.g. the new raw per-wavelength
+    channels above) that need trimming/cutting identically to x/raw/corr, returned back under
+    "extra_channels". Optional and backward compatible: omitting it behaves exactly as before.
+
+---
+
 ## Version 1.8.0:
   New:
   - processing_TDT.py: debounce_events(times, min_isi) — collapses switch-bounce/double-tap

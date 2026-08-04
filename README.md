@@ -11,7 +11,7 @@ Data processing and analysis library backing [PhysicsAnalysis](https://github.co
   - **Oxysoft / Artinis** (Oxymon, OctaMon, PortaMon …) NIRS `.txt` exports
   - **Terranova Prospa** `.pt2` EFNMR/MRI 2D images
   - Generic **Excel / CSV / TSV / plain text**, with automatic sub-table detection for side-by-side data layouts on one sheet
-- **Processes signals** — bleach correction, denoising, Z-score PETH slicing, FFT with peak annotation, slope/segment analysis
+- **Processes signals** — RANSAC-robust motion correction, bleach correction, denoising, Z-score PETH slicing, FFT with peak annotation, slope/segment analysis
 - **Fits curves** — linear, single/double exponential, exponential rise, Gaussian, sinusoidal, and a photon-entanglement visibility model, all via `scipy.optimize.curve_fit`
 - **Analyses text field studies** — one JSON file per subject with several free-text fields; pick any pair of fields to compare directly (e.g. does the answer to one question track another for the same subject). Word counts, data-quality flagging, sentence-transformers embeddings, an optional delta-vector magnitude between two fields, and an optional paired-similarity metric per pair with a permutation test and a word-count confound check. Domain-agnostic — field names and which pairs to compare are supplied by the caller, nothing is hardcoded to one study
 - **Validates the similarity metric statistically** — Benjamini-Hochberg FDR-corrected permutation-test p-values, Cohen's d effect size, a word-count-controlled OLS regression (statsmodels), a bootstrap confidence interval on the mean, and a leave-one-out sensitivity check, one row per field pair, with docstrings explaining what each statistic means
@@ -56,7 +56,7 @@ git+https://github.com/zakgm2/PhysicsLibrary.git
 ### Requirements
 
 - Python 3.10+
-- `numpy`, `scipy`, `tdt`, `pandas`, `sentence-transformers`, `statsmodels` (installed automatically)
+- `numpy`, `scipy`, `tdt`, `pandas`, `sentence-transformers`, `statsmodels`, `scikit-learn` (installed automatically)
 - `sentence-transformers` pulls in `torch`/`transformers` as transitive dependencies — a genuinely heavy install (hundreds of MB) if you only need the signal-processing side; only actually loaded when you call `embed_text_fields`/`run_field_study_pipeline`
 - `openpyxl` — only needed for `.xlsx`/`.xls` files; imported lazily with a clear error if missing when you actually try to load Excel
 
