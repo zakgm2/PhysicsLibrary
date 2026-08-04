@@ -10,11 +10,54 @@ Depends on the `tdt` Python SDK for reading tank files.
 import os
 
 import numpy as np
+from sklearn.linear_model import RANSACRegressor
 from scipy.optimize import curve_fit
 from scipy.signal import butter, filtfilt
 import tdt
 
 from .models import double_exponential_model as double_exponential
+
+
+def _robust_linear_fit(x, y):
+    """
+    RANSAC robust linear regression: y = a*x + b.
+
+    Motion correction regresses the isosbestic (415 nm) stream onto the
+    signal (465 nm) stream — an ordinary least-squares fit (np.polyfit)
+    lets exactly the kind of thing this regression is meant to remove
+    (a burst of motion artifact, a fiber-cord twist) drag the fitted line
+    toward itself, corrupting the "motion-free" prediction everywhere
+    else in the recording, not just where the artifact happened. RANSAC
+    instead repeatedly fits a line to small random subsets, keeps whichever
+    subset gets the most other points within `residual_threshold` of it
+    (the "inliers"), and does one final fit on just those inliers — points
+    that never look like they belong to the same line (i.e. artifacts)
+    are excluded from the fit entirely rather than merely downweighted.
+
+    residual_threshold is set explicitly (3x a robust noise estimate) —
+    sklearn's own default (the MAD of y around its median) is calibrated
+    for roughly-flat data and comes out far too loose here, since y's
+    spread is dominated by the real 415-vs-465 trend rather than noise;
+    left at the default, RANSAC would accept every point as an inlier and
+    silently degrade to an ordinary least-squares fit, which is worse than
+    not using RANSAC at all — no error, just no actual robustness.
+
+    Returns
+    -------
+    (a, b) : float
+        Slope and intercept.
+    """
+    # Consecutive-sample differences cancel out any slow trend, leaving
+    # (mostly) just noise — a standard robust noise-level estimator, scaled
+    # by 1.4826/0.6745 to make it comparable to a Gaussian standard
+    # deviation (the usual normalization for a median-absolute-deviation
+    # estimate) so "3x" reads the same way a 3-sigma threshold would.
+    noise_est = np.median(np.abs(np.diff(y))) / 0.6745 * 1.4826
+    model = RANSACRegressor(residual_threshold=3 * noise_est, random_state=0)
+    model.fit(x.reshape(-1, 1), y)
+    a = float(model.estimator_.coef_[0])
+    b = float(model.estimator_.intercept_)
+    return a, b
 
 
 def validate_tdt_folder(path):
@@ -74,6 +117,11 @@ def process_tdt_folder(folder_path):
         - fs: sampling frequency
         - store: signal label
         - markers: behavioral event markers
+        - channels: list of {"key", "label", "y"} for each raw
+          per-wavelength stream found (always "main_driver"; "isosbestic"
+          too if a 415 reference stream exists) — the un-motion-corrected,
+          un-normalized traces, for a caller that wants to plot/analyze
+          one of them directly instead of only "raw"/"corr" above
     """
     data_struct = get_tdt_struct(folder_path)
     streams = data_struct.streams.keys()
@@ -88,8 +136,8 @@ def process_tdt_folder(folder_path):
 
     if name_415:
         _, y_415, _ = get_plot_data(data_struct, name_415)
-        p = np.polyfit(y_415, y_465, 1)
-        y_fit = np.polyval(p, y_415)
+        a, b = _robust_linear_fit(y_415, y_465)
+        y_fit = a * y_415 + b
         y_final = y_465 - y_fit
         display_name = f"Corrected {name_465} (via {name_415})"
     else:
@@ -102,15 +150,29 @@ def process_tdt_folder(folder_path):
     dff = (y_final - f0) / f0
     dff = denoise_signal(dff, fs, cutoff=5)
 
+    # Raw per-wavelength channels, for callers that want to plot/analyze
+    # the main driver (probe) or isosbestic (control) trace on its own
+    # instead of only the motion-corrected/normalized result above.
+    # Nothing about stream naming or count is hardcoded beyond the 465/415
+    # detection already done above — a block with no 415 reference simply
+    # has no 'isosbestic' entry, so this works for any experimental setup
+    # this function already supports.
+    channels = [
+        {"key": "main_driver", "label": f"Main Driver ({name_465})", "y": y_465},
+    ]
+    if name_415:
+        channels.append({"key": "isosbestic", "label": f"Isosbestic ({name_415})", "y": y_415})
+
     return {
-        "x":       x,
-        "raw":     y_final,
-        "corr":    dff,
-        "dff":     dff,
-        "f0":      f0,
-        "fs":      fs,
-        "store":   display_name,
-        "markers": get_event_markers(data_struct),
+        "x":        x,
+        "raw":      y_final,
+        "corr":     dff,
+        "dff":      dff,
+        "f0":       f0,
+        "fs":       fs,
+        "store":    display_name,
+        "markers":  get_event_markers(data_struct),
+        "channels": channels,
     }
 
 

@@ -44,7 +44,7 @@ def slice_markers_cut_out(markers, start, end, shift):
     return out
 
 
-def splice_keep_inside(x, raw, corr, markers, detected_markers, start, end):
+def splice_keep_inside(x, raw, corr, markers, detected_markers, start, end, extra_channels=None):
     """
     Trims x/raw/corr to [start, end] and filters both marker lists to
     the same range.
@@ -54,12 +54,18 @@ def splice_keep_inside(x, raw, corr, markers, detected_markers, start, end):
     x, raw, corr : array
     markers, detected_markers : list of dict, each with a 'time' key
     start, end : float
+    extra_channels : dict of {name: array}, optional
+        Any other arrays aligned sample-for-sample with x (e.g. a
+        recording's raw per-wavelength channels — main driver, isosbestic)
+        that also need trimming to the same range. Not required — a
+        caller with only x/raw/corr can omit it entirely.
 
     Returns
     -------
     dict with x, raw, corr (copies, not views), markers,
-    detected_markers, n_samples — or None if the range doesn't contain
-    at least 2 samples.
+    detected_markers, n_samples, extra_channels (trimmed the same way,
+    {} if none were given) — or None if the range doesn't contain at
+    least 2 samples.
     """
     i0 = int(np.searchsorted(x, start, side='left'))
     i1 = int(np.searchsorted(x, end, side='right'))
@@ -73,10 +79,11 @@ def splice_keep_inside(x, raw, corr, markers, detected_markers, start, end):
         "markers": slice_markers_keep_inside(markers, start, end),
         "detected_markers": slice_markers_keep_inside(detected_markers, start, end),
         "n_samples": i1 - i0,
+        "extra_channels": {name: y[i0:i1].copy() for name, y in (extra_channels or {}).items()},
     }
 
 
-def splice_cut_out(x, raw, corr, markers, detected_markers, start, end):
+def splice_cut_out(x, raw, corr, markers, detected_markers, start, end, extra_channels=None):
     """
     Removes [start, end] from x/raw/corr and stitches the remainder
     together, shifting everything after the cut backward by the cut's
@@ -88,11 +95,15 @@ def splice_cut_out(x, raw, corr, markers, detected_markers, start, end):
     x, raw, corr : array
     markers, detected_markers : list of dict, each with a 'time' key
     start, end : float
+    extra_channels : dict of {name: array}, optional
+        Any other arrays aligned sample-for-sample with x that also need
+        the same range cut out and stitched — see splice_keep_inside.
 
     Returns
     -------
-    dict with x, raw, corr, markers, detected_markers, n_samples — or
-    None if there isn't usable signal on both sides of the cut to
+    dict with x, raw, corr, markers, detected_markers, n_samples,
+    extra_channels (cut/stitched the same way, {} if none were given) —
+    or None if there isn't usable signal on both sides of the cut to
     stitch together.
     """
     i0 = int(np.searchsorted(x, start, side='left'))
@@ -110,4 +121,6 @@ def splice_cut_out(x, raw, corr, markers, detected_markers, start, end):
         "markers": slice_markers_cut_out(markers, start, end, shift),
         "detected_markers": slice_markers_cut_out(detected_markers, start, end, shift),
         "n_samples": len(new_x),
+        "extra_channels": {name: np.concatenate([y[:i0], y[i1:]])
+                            for name, y in (extra_channels or {}).items()},
     }
