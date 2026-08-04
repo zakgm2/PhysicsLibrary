@@ -26,6 +26,7 @@
     sentence-transformers, now declared explicitly). This changes dF/F output values for every
     TDT recording that has an isosbestic reference stream — not a bug fix to a wrong number, but
     a real change in which regression method computes it.
+    
   New:
   - processing_TDT.py: process_tdt_folder() now also returns "channels" — a list of
     {"key", "label", "y"} for each raw per-wavelength stream found (always "main_driver",
