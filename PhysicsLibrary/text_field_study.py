@@ -138,7 +138,18 @@ def embed_text_fields(df, fields, model_name="all-MiniLM-L6-v2"):
     dict
         {field: (n_subjects, dim) ndarray, ...}
     """
-    from sentence_transformers import SentenceTransformer
+    try:
+        from sentence_transformers import SentenceTransformer
+    except ImportError:
+        # Excluded from packaged/frozen builds of the GUI on purpose —
+        # it pulls in torch/transformers (hundreds of MB-1GB+) for a
+        # feature most installs never touch. Anyone hitting this from a
+        # source/pip install just doesn't have it installed yet.
+        raise ImportError(
+            "Text Field Study's field-similarity comparison needs the "
+            "optional sentence-transformers package, which isn't "
+            "installed. Install it with: pip install sentence-transformers"
+        ) from None
 
     model = SentenceTransformer(model_name)
     embeddings = {}
