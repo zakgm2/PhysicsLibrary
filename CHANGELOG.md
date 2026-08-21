@@ -2,6 +2,17 @@
 
 ---
 
+## Version 2026.8.21:
+  Fixed:
+  - .github/workflows/publish.yml's environment.url pointed at https://pypi.org/p/PhysicsLibrary —
+    the actual published project is named ZaksPhysicsLibrary (pyproject.toml's [project] name has
+    always said so), so that URL named a project that doesn't exist. Cosmetic only (it's just the
+    link shown in GitHub's environment UI, not something that affects what actually gets built or
+    uploaded), found while diagnosing why the 2026.8.20 release ended up published manually instead
+    of through this workflow.
+
+---
+
 ## Version 2026.8.20:
   (Switched to date-based versioning (YYYY.M.D) from this release on — PhysicsAnalysis stays on
   its own numbered scheme, this library just no longer tracks it 1:1, so a date reads more

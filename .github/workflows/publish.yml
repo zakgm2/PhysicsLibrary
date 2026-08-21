@@ -34,7 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/p/PhysicsLibrary
+      url: https://pypi.org/p/zaksphysicslibrary
     permissions:
       id-token: write  # required for PyPI Trusted Publishing (OIDC) — no API token needed
     steps:
