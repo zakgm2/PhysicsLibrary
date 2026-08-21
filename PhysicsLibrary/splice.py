@@ -55,9 +55,12 @@ def splice_keep_inside(x, raw, corr, markers, detected_markers, start, end, extr
     markers, detected_markers : list of dict, each with a 'time' key
     start, end : float
     extra_channels : dict of {name: array}, optional
-        Any other arrays aligned sample-for-sample with x (e.g. a
-        recording's raw per-wavelength channels — main driver, isosbestic)
-        that also need trimming to the same range. Not required — a
+        Any other arrays aligned sample-for-sample with x on their LAST
+        axis (e.g. a recording's raw per-wavelength channels — main
+        driver, isosbestic — each 1D; or a multi-detector array like
+        Oxysoft's o2hb/hhb, shape (n_detectors, n_samples)) that also
+        need trimming to the same range. Sliced along axis=-1 so both
+        1D and 2D arrays work with no special-casing. Not required — a
         caller with only x/raw/corr can omit it entirely.
 
     Returns
@@ -79,7 +82,7 @@ def splice_keep_inside(x, raw, corr, markers, detected_markers, start, end, extr
         "markers": slice_markers_keep_inside(markers, start, end),
         "detected_markers": slice_markers_keep_inside(detected_markers, start, end),
         "n_samples": i1 - i0,
-        "extra_channels": {name: y[i0:i1].copy() for name, y in (extra_channels or {}).items()},
+        "extra_channels": {name: y[..., i0:i1].copy() for name, y in (extra_channels or {}).items()},
     }
 
 
@@ -96,8 +99,10 @@ def splice_cut_out(x, raw, corr, markers, detected_markers, start, end, extra_ch
     markers, detected_markers : list of dict, each with a 'time' key
     start, end : float
     extra_channels : dict of {name: array}, optional
-        Any other arrays aligned sample-for-sample with x that also need
-        the same range cut out and stitched — see splice_keep_inside.
+        Any other arrays aligned sample-for-sample with x on their LAST
+        axis that also need the same range cut out and stitched — see
+        splice_keep_inside (1D and 2D, e.g. Oxysoft's multi-detector
+        arrays, both work).
 
     Returns
     -------
@@ -121,6 +126,6 @@ def splice_cut_out(x, raw, corr, markers, detected_markers, start, end, extra_ch
         "markers": slice_markers_cut_out(markers, start, end, shift),
         "detected_markers": slice_markers_cut_out(detected_markers, start, end, shift),
         "n_samples": len(new_x),
-        "extra_channels": {name: np.concatenate([y[:i0], y[i1:]])
+        "extra_channels": {name: np.concatenate([y[..., :i0], y[..., i1:]], axis=-1)
                             for name, y in (extra_channels or {}).items()},
     }

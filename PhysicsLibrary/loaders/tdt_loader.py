@@ -11,13 +11,13 @@ from .. import processing_TDT
 from ..dataset import Dataset
 
 
-def load_tdt(folder_path: str, folder_name: str) -> Dataset:
+def load_tdt(folder_path: str, folder_name: str, regression_method: str = "ransac") -> Dataset:
     """Load a TDT tank using the existing validate + process pipeline."""
     valid, msg = processing_TDT.validate_tdt_folder(folder_path)
     if not valid:
         raise ValueError(f"TDT validation failed: {msg}")
 
-    result     = processing_TDT.process_tdt_folder(folder_path)
+    result     = processing_TDT.process_tdt_folder(folder_path, regression_method=regression_method)
     signals    = result["corr"]
     signals_2d = signals[np.newaxis, :]
     fs         = float(result["fs"])

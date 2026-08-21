@@ -2,6 +2,43 @@
 
 ---
 
+## Version 2026.8.20:
+  (Switched to date-based versioning (YYYY.M.D) from this release on — PhysicsAnalysis stays on
+  its own numbered scheme, this library just no longer tracks it 1:1, so a date reads more
+  honestly than a semver bump would.)
+
+  New:
+  - Motion correction's isosbestic-vs-signal regression is now a choice, not just RANSAC:
+    _robust_linear_fit()/process_tdt_folder()/loaders/tdt_loader.py's load_tdt() all take a new
+    regression_method parameter ("ransac" | "huber" | "ols", the valid set exported as
+    REGRESSION_METHODS). Huber down-weights outliers instead of excluding them outright — gentler
+    than RANSAC's hard in/out cut, better suited to noise that's elevated throughout a recording
+    rather than concentrated in a few bad stretches. OLS is a plain least-squares baseline with no
+    robustness at all, included for comparison. Defaults to "ransac" everywhere, unchanged from
+    before this existed.
+  - New analysis.py helpers backing the GUI's AUC and Event PETH tools: compute_auc_from_trace()/
+    compute_auc_window()/compute_auc_matrix() (area under a z-score trace, split into
+    total/positive/negative) and compute_peri_event_from_trace()/compute_peri_event_matrix() (peak
+    amplitude, latency, and mean time-bins around an event, single-trace or across a whole trial
+    matrix). find_fft_peaks() factored out of annotate_fft_peaks() (which now calls it and only
+    handles the drawing) so a caller building a stats/export panel can get the same peak list
+    without needing a matplotlib axes to draw on.
+  - estimate_sample_rate(), mean_channels(), compute_group_stats(), compute_marker_intervals():
+    small formulas (median-diff sample rate, 2D-detector-array channel averaging, trial mean/SEM,
+    marker-to-marker interval diffing) that were previously duplicated across several call sites in
+    the GUI, now defined once here.
+
+  Changed:
+  - splice_keep_inside()/splice_cut_out()'s extra_channels slicing is now axis-agnostic
+    (y[..., i0:i1] / np.concatenate(..., axis=-1) instead of y[i0:i1] / np.concatenate([...])) — a
+    2D multi-detector array (e.g. Oxysoft's o2hb/hhb, shape (n_detectors, n_samples)) now splices
+    correctly alongside the 1D case this already handled, with no special-casing needed by callers.
+  - Added openpyxl to dependencies — loaders/file_parser_generic.py's Excel support has needed it
+    all along; it just wasn't declared, so a fresh install without pandas' own optional Excel
+    extras would fail on the first .xlsx file.
+
+---
+
 ## Version 1.10.0:
   New:
   - process_tdt_folder() now returns "motion_correction_inlier_fraction": the fraction (0-1)

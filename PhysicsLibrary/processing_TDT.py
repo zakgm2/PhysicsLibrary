@@ -10,62 +10,97 @@ Depends on the `tdt` Python SDK for reading tank files.
 import os
 
 import numpy as np
-from sklearn.linear_model import RANSACRegressor
+from sklearn.linear_model import HuberRegressor, RANSACRegressor
 from scipy.optimize import curve_fit
 from scipy.signal import butter, filtfilt
 import tdt
 
 from .models import double_exponential_model as double_exponential
 
+REGRESSION_METHODS = ("ransac", "huber", "ols")
 
-def _robust_linear_fit(x, y):
+
+def _robust_linear_fit(x, y, method="ransac"):
     """
-    RANSAC robust linear regression: y = a*x + b.
-    
-    Motion correction regresses the isosbestic (415 nm) stream onto the signal 
-    (465 nm) stream. An ordinary least-squares fit (np.polyfit) lets the exact 
-    kind of thing this regression is meant to remove (a burst of motion 
-    artifact, a fiber-cord twist) drag the fitted line toward itself, 
-    corrupting the motion-free prediction everywhere else in the recording.
-    
-    RANSAC instead repeatedly fits a line to small random subsets, keeps 
-    whichever subset gets the most other points within residual_threshold of it 
-    (the inliers), and does one final fit on just those inliers. Points that 
-    never look like they belong to the same line (i.e., artifacts) are excluded 
-    from the fit entirely rather than merely downweighted.
-    
-    residual_threshold is set explicitly to 3x a robust noise estimate.
-    sklearn's own default (the MAD of y around its median) is calibrated for
-    roughly-flat data and comes out far too loose here, since y's spread is
-    dominated by the real 415-vs-465 trend rather than noise; left at the
-    default, RANSAC would accept every point as an inlier and silently
-    degrade to an ordinary least-squares fit.
+    Motion correction regresses the isosbestic (415 nm) stream onto the
+    signal (465 nm) stream. An ordinary least-squares fit (np.polyfit) lets
+    the exact kind of thing this regression is meant to remove (a burst of
+    motion artifact, a fiber-cord twist) drag the fitted line toward
+    itself, corrupting the motion-free prediction everywhere else in the
+    recording — RANSAC and Huber are two different ways of resisting that;
+    OLS is offered as a plain, no-robustness baseline.
 
-    The noise estimate itself comes from the MAD of an initial ordinary
-    least-squares fit's residuals (not from consecutive-sample
-    differences, tried previously) — diff-based noise estimation
-    measures noise at the timescale of one sample, which at TDT's
-    sampling rates (~1 kHz, adjacent samples ~1ms apart) is dominated by
-    ADC/thermal noise far smaller than the residual scale a real
-    415-vs-465 regression actually produces once genuine biological
-    signal (the very thing this correction is meant to preserve, not
-    remove) is accounted for. Confirmed on a real recording: diff-based
-    noise estimation set a threshold ~350x tighter than the fit's actual
-    residual scale, rejecting 98% of samples as "outliers". MAD of the
-    OLS fit's own residuals is on the right scale by construction, and
-    stays robust to the artifacts it's meant to exclude — they're
-    exactly the kind of minority-of-points deviation MAD is insensitive
-    to, same reasoning as using MAD over standard deviation anywhere
-    else here.
+    method : {"ransac", "huber", "ols"}
+        "ransac" (default): repeatedly fits a line to small random
+        subsets, keeps whichever subset gets the most other points within
+        residual_threshold of it (the inliers), and does one final fit on
+        just those inliers. Points that never look like they belong to the
+        same line (i.e., artifacts) are excluded from the fit entirely
+        rather than merely downweighted — the right choice when artifacts
+        are occasional and severe (a fiber-cord twist, a brief motion
+        burst) rather than spread continuously through the recording.
+
+        residual_threshold is set explicitly to 3x a robust noise
+        estimate. sklearn's own default (the MAD of y around its median)
+        is calibrated for roughly-flat data and comes out far too loose
+        here, since y's spread is dominated by the real 415-vs-465 trend
+        rather than noise; left at the default, RANSAC would accept every
+        point as an inlier and silently degrade to an ordinary
+        least-squares fit.
+
+        The noise estimate itself comes from the MAD of an initial
+        ordinary least-squares fit's residuals (not from
+        consecutive-sample differences, tried previously) — diff-based
+        noise estimation measures noise at the timescale of one sample,
+        which at TDT's sampling rates (~1 kHz, adjacent samples ~1ms
+        apart) is dominated by ADC/thermal noise far smaller than the
+        residual scale a real 415-vs-465 regression actually produces once
+        genuine biological signal (the very thing this correction is
+        meant to preserve, not remove) is accounted for. Confirmed on a
+        real recording: diff-based noise estimation set a threshold ~350x
+        tighter than the fit's actual residual scale, rejecting 98% of
+        samples as "outliers". MAD of the OLS fit's own residuals is on
+        the right scale by construction, and stays robust to the
+        artifacts it's meant to exclude — they're exactly the kind of
+        minority-of-points deviation MAD is insensitive to, same reasoning
+        as using MAD over standard deviation anywhere else here.
+
+        "huber": every point stays in the fit, but points far from the
+        line (beyond `epsilon` times the residual scale, sklearn's
+        default epsilon=1.35) get down-weighted rather than excluded —
+        gentler than RANSAC's hard in/out cut, better suited to noise
+        that's elevated throughout rather than concentrated in a few bad
+        stretches.
+
+        "ols": plain np.polyfit — no robustness at all. Included as a
+        baseline / for comparison, not recommended for real motion
+        correction (see the module-level RANSAC discussion above for why).
 
     Returns
     -------
     (a, b, inlier_fraction) : float
-        Slope, intercept, and the fraction of points RANSAC kept as
-        inliers for the final fit (1.0 = every point used, same as an
-        ordinary least-squares fit would; lower means more of the
-        recording was judged to be motion artifact and excluded).
+        Slope, intercept, and the fraction of points kept as inliers for
+        the final fit (1.0 = every point used). RANSAC's is a real
+        exclusion fraction; OLS always reports 1.0 (never excludes
+        anything); Huber's is 1 - the fraction its own `outliers_` mask
+        flags as beyond epsilon, so it stays informative despite Huber
+        never truly dropping a point from the fit.
     """
+    if method not in REGRESSION_METHODS:
+        raise ValueError(f"Unknown regression method {method!r}; expected one of {REGRESSION_METHODS}")
+
+    if method == "ols":
+        a, b = np.polyfit(x, y, 1)
+        return float(a), float(b), 1.0
+
+    if method == "huber":
+        model = HuberRegressor()
+        model.fit(x.reshape(-1, 1), y)
+        a = float(model.coef_[0])
+        b = float(model.intercept_)
+        inlier_fraction = float(np.mean(~model.outliers_))
+        return a, b, inlier_fraction
+
     ols_coeffs = np.polyfit(x, y, 1)
     ols_resid = y - np.polyval(ols_coeffs, x)
     # 0.6745 maps MAD to a Gaussian standard deviation.
@@ -110,7 +145,7 @@ def validate_tdt_folder(path):
         return False, "Invalid Folder: No TDT block files (.Tbk) found."
 
 
-def process_tdt_folder(folder_path):
+def process_tdt_folder(folder_path, regression_method="ransac"):
     """
     Full photometry processing pipeline for a TDT recording.
 
@@ -127,6 +162,11 @@ def process_tdt_folder(folder_path):
     ----------
     folder_path : str
         Path to TDT recording folder.
+    regression_method : {"ransac", "huber", "ols"}
+        Which linear regression the isosbestic-onto-signal motion
+        correction (step 3) uses — see _robust_linear_fit's own docstring
+        for what each one actually does. Defaults to "ransac", the most
+        robust of the three against occasional severe artifacts.
 
     Returns
     -------
@@ -146,8 +186,9 @@ def process_tdt_folder(folder_path):
           un-normalized traces, for a caller that wants to plot/analyze
           one of them directly instead of only "raw"/"corr" above
         - motion_correction_inlier_fraction: fraction (0-1) of samples
-          RANSAC kept as inliers during motion correction, or None if
-          there was no 415 reference stream to correct against
+          kept as inliers during motion correction (see
+          _robust_linear_fit for what this means per regression_method),
+          or None if there was no 415 reference stream to correct against
     """
     data_struct = get_tdt_struct(folder_path)
     streams = data_struct.streams.keys()
@@ -162,7 +203,7 @@ def process_tdt_folder(folder_path):
 
     if name_415:
         _, y_415, _ = get_plot_data(data_struct, name_415)
-        a, b, inlier_fraction = _robust_linear_fit(y_415, y_465)
+        a, b, inlier_fraction = _robust_linear_fit(y_415, y_465, method=regression_method)
         y_fit = a * y_415 + b
         y_final = y_465 - y_fit
         display_name = f"Corrected {name_465} (via {name_415})"

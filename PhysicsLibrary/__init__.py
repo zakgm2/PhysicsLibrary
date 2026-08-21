@@ -36,19 +36,30 @@ from .processing_TDT import (
     denoise_signal,
     get_event_markers,
     debounce_events,
+    REGRESSION_METHODS,
 )
 
 from .analysis import (
+    estimate_sample_rate,
+    mean_channels,
+    compute_group_stats,
+    compute_marker_intervals,
     get_zscore_slice,
     smooth_signal,
     bin_for_heatmap,
     compute_fft_slice,
+    find_fft_peaks,
     annotate_fft_peaks,
     compute_slope_segment,
     fit_model_to_segment,
     compute_event_zscore_peth,
     find_significant_peaks,
     find_peak_near_events,
+    compute_auc_from_trace,
+    compute_auc_window,
+    compute_auc_matrix,
+    compute_peri_event_from_trace,
+    compute_peri_event_matrix,
 )
 
 from .splice import (

@@ -38,10 +38,16 @@ def load_dataset_file(file_path: str) -> Dataset:
     raise ValueError(f"Unrecognised file format: {file_path}")
 
 
-def load_dataset(folder_path: str, fmt: Optional[DataFormat] = None) -> Dataset:
+def load_dataset(folder_path: str, fmt: Optional[DataFormat] = None,
+                  regression_method: str = "ransac") -> Dataset:
     """
     Load a recording folder and return a Dataset.
     If *fmt* is None, detect_format() is called automatically.
+
+    regression_method : {"ransac", "huber", "ols"}
+        TDT-only — forwarded to load_tdt()/process_tdt_folder() for the
+        isosbestic-vs-signal motion-correction regression. Ignored for
+        Oxysoft, which has no such correction step.
     """
     folder_name = os.path.basename(folder_path.rstrip('/\\'))
 
@@ -49,7 +55,7 @@ def load_dataset(folder_path: str, fmt: Optional[DataFormat] = None) -> Dataset:
         fmt = detect_format(folder_path)
 
     if fmt is DataFormat.TDT:
-        return load_tdt(folder_path, folder_name)
+        return load_tdt(folder_path, folder_name, regression_method=regression_method)
     elif fmt is DataFormat.OXYSOFT:
         return load_oxysoft(folder_path, folder_name)
     else:
