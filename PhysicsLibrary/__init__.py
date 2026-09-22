@@ -29,6 +29,7 @@ from .loaders.pt2_loader import load_pt2
 
 from .processing_TDT import (
     process_tdt_folder,
+    compute_dff,
     validate_tdt_folder,
     get_tdt_struct,
     get_plot_data,
@@ -49,7 +50,6 @@ from .analysis import (
     bin_for_heatmap,
     compute_fft_slice,
     find_fft_peaks,
-    annotate_fft_peaks,
     compute_slope_segment,
     fit_model_to_segment,
     compute_event_zscore_peth,

@@ -2,6 +2,52 @@
 
 ---
 
+## Version 2026.9.22:
+  New:
+  - `compute_dff(y_465, y_415, fs, regression_method)` factored out of `process_tdt_folder` —
+    the motion-correction + bleaching-correction + ΔF/F + denoise steps, callable on their own
+    against any raw 465/415 signal pair, not just a fresh TDT block load. Built for
+    PhysicsAnalysis's Splice "Cut out this range": re-running this on a stitched, artifact-removed
+    signal gives a genuinely improved correction (the artifact no longer drags the fit) rather
+    than just a shorter view of the original one. `process_tdt_folder` now calls this internally
+    instead of duplicating the same steps inline.
+
+  Changed:
+  - `analysis.py` (824 lines, every analysis tool's numeric implementation in one file) split
+    into an `analysis/` package, one file per tool — `shared.py`, `zscore_peth.py`,
+    `event_peth.py`, `auc.py`, `fft.py`, `peak_finder.py`, `curve_fit.py`, `intervals.py` — mirroring
+    how physicsanalysis_qt/analysis/ already splits the GUI side of each tool. `analysis/__init__.py`
+    re-exports every name under the same `PhysicsLibrary.analysis` namespace, so this is purely
+    internal reorganization — no public name moved, renamed, or changed behavior, except
+    `annotate_fft_peaks` (see Removed below).
+
+  Removed:
+  - `annotate_fft_peaks` — it drew matplotlib annotations (fontsize, arrow styling, a vertical
+    line) directly onto a caller-supplied Axes, which is presentation logic that doesn't belong in
+    a library with no other GUI/rendering code anywhere in it. The peak-finding it depended on
+    (`find_fft_peaks`) stays here; the drawing moved to physicsanalysis_qt's own analysis/fft.py
+    as a local `_annotate_fft_peaks`, the only place that ever called it.
+
+  Fixed:
+  - `splice_cut_out` refused to cut a range touching either edge of the recording (it required
+    "usable signal on both sides" of the cut), so removing e.g. a bad first few seconds wasn't
+    possible — only requires at least 2 samples to remain overall now. Also fixes a latent
+    IndexError this same border case would have hit (`x[i1]` when the cut ran to the very end,
+    i1 == len(x)).
+
+  Changed:
+  - Default `regression_method` for TDT motion correction is now `"ols"` instead of `"ransac"`
+    (`_robust_linear_fit`, `process_tdt_folder`, `load_tdt`, `load_dataset`). RANSAC excludes
+    whatever it judges an outlier from the fit but still applies the fit there — a real, large
+    biological transient that merely looks unusual gets a distorted correction, not just an
+    imperfect one. OLS never actively excludes or downweights a sample, so it can't misjudge
+    signal as noise that way; its own weakness (the fit line can get dragged toward a severe
+    artifact) is a known, predictable trade-off instead. RANSAC/Huber remain available and are
+    worth trying per-recording when artifacts are severe and occasional enough to favor excluding
+    them outright.
+
+---
+
 ## Version 2026.8.21:
   Fixed:
   - .github/workflows/publish.yml's environment.url pointed at https://pypi.org/p/PhysicsLibrary —

@@ -20,18 +20,33 @@ from .models import double_exponential_model as double_exponential
 REGRESSION_METHODS = ("ransac", "huber", "ols")
 
 
-def _robust_linear_fit(x, y, method="ransac"):
+def _robust_linear_fit(x, y, method="ols"):
     """
     Motion correction regresses the isosbestic (415 nm) stream onto the
     signal (465 nm) stream. An ordinary least-squares fit (np.polyfit) lets
     the exact kind of thing this regression is meant to remove (a burst of
     motion artifact, a fiber-cord twist) drag the fitted line toward
     itself, corrupting the motion-free prediction everywhere else in the
-    recording — RANSAC and Huber are two different ways of resisting that;
-    OLS is offered as a plain, no-robustness baseline.
+    recording — RANSAC and Huber are two different ways of resisting that.
 
     method : {"ransac", "huber", "ols"}
-        "ransac" (default): repeatedly fits a line to small random
+        "ols" (default): plain np.polyfit — no robustness at all. Chosen
+        as the default over RANSAC/Huber because it never actively
+        discards or downweights a sample: RANSAC in particular treats
+        whatever it excludes as "not part of the fit" and then still
+        applies the fit there, which means a point it misjudges (a real,
+        large biological transient that merely looks unusual relative to
+        the rest of the recording, not an artifact) gets a distorted
+        correction rather than a merely-imperfect one. OLS's own
+        weakness — the fit line itself gets dragged toward severe
+        artifacts — is a known, predictable trade-off; it doesn't risk
+        silently mis-classifying real signal as noise. RANSAC or Huber
+        are still worth trying on a given recording (see the Options
+        dialog's regression picker) when artifacts are severe and
+        occasional enough that this trade-off clearly favors excluding
+        them.
+
+        "ransac": repeatedly fits a line to small random
         subsets, keeps whichever subset gets the most other points within
         residual_threshold of it (the inliers), and does one final fit on
         just those inliers. Points that never look like they belong to the
@@ -71,10 +86,6 @@ def _robust_linear_fit(x, y, method="ransac"):
         gentler than RANSAC's hard in/out cut, better suited to noise
         that's elevated throughout rather than concentrated in a few bad
         stretches.
-
-        "ols": plain np.polyfit — no robustness at all. Included as a
-        baseline / for comparison, not recommended for real motion
-        correction (see the module-level RANSAC discussion above for why).
 
     Returns
     -------
@@ -145,7 +156,60 @@ def validate_tdt_folder(path):
         return False, "Invalid Folder: No TDT block files (.Tbk) found."
 
 
-def process_tdt_folder(folder_path, regression_method="ransac"):
+def compute_dff(y_465, y_415, fs, regression_method="ols"):
+    """
+    The actual motion-correction + bleaching-correction + ΔF/F + denoise
+    pipeline (steps 3-6 of process_tdt_folder's docstring), factored out
+    so it can be re-run on a signal that isn't a fresh TDT load — namely
+    Splice's "Cut out this range": removing an artifact and re-running
+    this on the stitched remainder can give a genuinely better motion
+    correction (the artifact is gone from what the regression fits
+    against), not just a shorter view of the original fit. See
+    physicsanalysis_qt's analysis/splice.py for that caller.
+
+    Parameters
+    ----------
+    y_465 : array
+        Main driver (signal) fluorescence.
+    y_415 : array or None
+        Isosbestic (control) fluorescence, same length as y_465. None
+        skips motion correction entirely (single-channel recording).
+    fs : float
+        Sampling rate, for correct_bleaching/denoise_signal.
+    regression_method : {"ransac", "huber", "ols"}
+        See _robust_linear_fit.
+
+    Returns
+    -------
+    dict with raw (motion-corrected fluorescence), corr/dff (denoised
+    ΔF/F), f0 (bleaching baseline), motion_correction_inlier_fraction
+    (None if y_415 is None) — the same subset of process_tdt_folder's
+    own return dict that actually depends on this computation.
+    """
+    if y_415 is not None:
+        a, b, inlier_fraction = _robust_linear_fit(y_415, y_465, method=regression_method)
+        y_fit = a * y_415 + b
+        y_final = y_465 - y_fit
+    else:
+        y_final = y_465
+        inlier_fraction = None
+
+    _, trend = correct_bleaching(y_final, fs)
+
+    f0  = np.maximum(trend, 1e-6)
+    dff = (y_final - f0) / f0
+    dff = denoise_signal(dff, fs, cutoff=5)
+
+    return {
+        "raw": y_final,
+        "corr": dff,
+        "dff": dff,
+        "f0": f0,
+        "motion_correction_inlier_fraction": inlier_fraction,
+    }
+
+
+def process_tdt_folder(folder_path, regression_method="ols"):
     """
     Full photometry processing pipeline for a TDT recording.
 
@@ -165,8 +229,10 @@ def process_tdt_folder(folder_path, regression_method="ransac"):
     regression_method : {"ransac", "huber", "ols"}
         Which linear regression the isosbestic-onto-signal motion
         correction (step 3) uses — see _robust_linear_fit's own docstring
-        for what each one actually does. Defaults to "ransac", the most
-        robust of the three against occasional severe artifacts.
+        for what each one actually does. Defaults to "ols", the plain
+        non-robust baseline — see _robust_linear_fit for why that's the
+        safer default over RANSAC/Huber despite being the least
+        artifact-resistant of the three.
 
     Returns
     -------
@@ -201,22 +267,17 @@ def process_tdt_folder(folder_path, regression_method="ransac"):
 
     x, y_465, fs = get_plot_data(data_struct, name_465)
 
+    y_415 = None
     if name_415:
         _, y_415, _ = get_plot_data(data_struct, name_415)
-        a, b, inlier_fraction = _robust_linear_fit(y_415, y_465, method=regression_method)
-        y_fit = a * y_415 + b
-        y_final = y_465 - y_fit
-        display_name = f"Corrected {name_465} (via {name_415})"
-    else:
-        y_final = y_465
-        display_name = f"{name_465} (Uncorrected)"
-        inlier_fraction = None
+    display_name = (f"Corrected {name_465} (via {name_415})" if name_415
+                     else f"{name_465} (Uncorrected)")
 
-    _, trend = correct_bleaching(y_final, fs)
-
-    f0  = np.maximum(trend, 1e-6)
-    dff = (y_final - f0) / f0
-    dff = denoise_signal(dff, fs, cutoff=5)
+    computed = compute_dff(y_465, y_415, fs, regression_method=regression_method)
+    y_final = computed["raw"]
+    dff = computed["corr"]
+    f0 = computed["f0"]
+    inlier_fraction = computed["motion_correction_inlier_fraction"]
 
     # Raw per-wavelength channels, for callers that want to plot/analyze
     # the main driver (probe) or isosbestic (control) trace on its own

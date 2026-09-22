@@ -39,7 +39,7 @@ def load_dataset_file(file_path: str) -> Dataset:
 
 
 def load_dataset(folder_path: str, fmt: Optional[DataFormat] = None,
-                  regression_method: str = "ransac") -> Dataset:
+                  regression_method: str = "ols") -> Dataset:
     """
     Load a recording folder and return a Dataset.
     If *fmt* is None, detect_format() is called automatically.

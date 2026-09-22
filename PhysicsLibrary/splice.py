@@ -93,6 +93,12 @@ def splice_cut_out(x, raw, corr, markers, detected_markers, start, end, extra_ch
     duration so the timeline stays contiguous. Markers inside the cut
     are dropped; markers after it are shifted by the same amount.
 
+    The cut is allowed to touch either edge of the recording — cutting
+    from x[0] up to some end point, or from some start point to x[-1],
+    needs no stitching at all (one side is simply empty) and works the
+    same as the general case below; it doesn't need special-casing
+    beyond not indexing x[i1] when i1 lands past the last sample.
+
     Parameters
     ----------
     x, raw, corr : array
@@ -108,15 +114,19 @@ def splice_cut_out(x, raw, corr, markers, detected_markers, start, end, extra_ch
     -------
     dict with x, raw, corr, markers, detected_markers, n_samples,
     extra_channels (cut/stitched the same way, {} if none were given) —
-    or None if there isn't usable signal on both sides of the cut to
-    stitch together.
+    or None if fewer than 2 samples would remain overall (matches
+    splice_keep_inside's own minimum).
     """
     i0 = int(np.searchsorted(x, start, side='left'))
     i1 = int(np.searchsorted(x, end, side='right'))
-    if i0 < 1 or i1 >= len(x) - 1 or i1 <= i0:
+    if i1 <= i0:
+        return None
+    if i0 + (len(x) - i1) < 2:
         return None
 
-    shift = float(x[i1] - x[i0])  # cut duration, used to reconnect the timeline
+    # cut duration, used to reconnect the timeline — 0 when the cut runs
+    # to the very end, since there's nothing after it to shift anyway
+    shift = float(x[i1] - x[i0]) if i1 < len(x) else 0.0
     new_x = np.concatenate([x[:i0], x[i1:] - shift])
 
     return {

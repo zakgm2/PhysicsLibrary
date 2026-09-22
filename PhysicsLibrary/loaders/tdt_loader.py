@@ -11,7 +11,7 @@ from .. import processing_TDT
 from ..dataset import Dataset
 
 
-def load_tdt(folder_path: str, folder_name: str, regression_method: str = "ransac") -> Dataset:
+def load_tdt(folder_path: str, folder_name: str, regression_method: str = "ols") -> Dataset:
     """Load a TDT tank using the existing validate + process pipeline."""
     valid, msg = processing_TDT.validate_tdt_folder(folder_path)
     if not valid:
