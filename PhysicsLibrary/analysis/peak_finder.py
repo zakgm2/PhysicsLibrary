@@ -14,7 +14,7 @@ from .shared import estimate_sample_rate
 from .zscore_peth import get_zscore_slice
 
 
-def find_significant_peaks(time_array, signal, z_threshold=2.5, min_distance_sec=1.0,
+def find_significant_peaks(time_array, signal, z_threshold=5.0, min_distance_sec=1.0,
                             include_troughs=False):
     """
     Auto-detect statistically significant transients directly from the
@@ -37,7 +37,8 @@ def find_significant_peaks(time_array, signal, z_threshold=2.5, min_distance_sec
         this function does no filtering of its own.
     z_threshold : float
         Minimum z-score (standard deviations above the recording's own
-        mean) for a peak to count as "statistically significant".
+        mean) for a peak to count as "statistically significant". The
+        default of 5 is the usual five-sigma convention.
     min_distance_sec : float
         Minimum spacing between detected peaks, in seconds.
     include_troughs : bool
@@ -73,7 +74,7 @@ def find_significant_peaks(time_array, signal, z_threshold=2.5, min_distance_sec
 
 
 def find_peak_near_events(time_array, signal, event_times, pre, post,
-                           z_threshold=2.5, include_troughs=False):
+                           z_threshold=5.0, include_troughs=False):
     """
     Check whether a statistically significant peak actually shows up near
     each given event time, rather than assuming the event marker itself
@@ -94,6 +95,14 @@ def find_peak_near_events(time_array, signal, event_times, pre, post,
         Seconds before/after each event to search within.
     z_threshold : float
         Minimum |z-score| within the window for a peak to count as found.
+        The default of 5 (the usual five-sigma convention) is deliberately
+        strict: the search takes the LARGEST z over every sample in the
+        window, so a low threshold reports a "response" by chance in most
+        windows. On a real fibre-photometry recording searched the way PyAT
+        does it (0.5 s-smoothed dF/F, 5 s baseline, 10 s response window),
+        random pseudo-events (nothing to do with the animal) were reported
+        as having a response 58% of the time at 2.5, 40% at 3, 21% at 4 and
+        10% at 5; the exact rates depend on the window lengths.
     include_troughs : bool
         Also consider negative-going deflections as candidate "peaks",
         keeping whichever (peak or trough) is more extreme.

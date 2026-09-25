@@ -2,6 +2,46 @@
 
 ---
 
+## Version 2026.9.24:
+  Fixed:
+  - Motion correction is now fitted in float64. TDT delivers float32, and `np.polyfit` on float32
+    data silently drops the slope term once a recording is long (about 200,000 samples for a 415 nm
+    channel of 25 ± 1, i.e. ~3 minutes at 1 kHz): it returned a line at roughly half the true slope
+    with a large intercept, with only a `RankWarning`. That broke the OLS method (the default since
+    2026.9.22) and RANSAC's noise estimate on any longer recording; on a 17-minute test recording the
+    default's peak PETH z-scores were 2-3x too large. RANSAC and Huber results barely change.
+  - `compute_dff` (two-channel): ΔF/F is now the motion-corrected residual divided by the 465
+    channel's bleaching baseline. It used to divide the residual by the bleaching trend of that same
+    near-zero residual, so the values were not ΔF/F and their scale changed by orders of magnitude
+    with the regression method (a simulated 10% transient read +1,650% with Huber and +399,000% with
+    OLS). `f0` now returns the baseline fluorescence; `raw` is unchanged. Everything is computed in
+    float64.
+  - `get_zscore_slice` no longer clips the signal to ±5 in raw units. That made z-scores depend on
+    the units of the signal, returned all zeros for signals sitting above 5, truncated large
+    responses and biased latencies early. The baseline mean/SD are now taken after winsorising the
+    baseline at 5 robust SDs (so a brief artifact still can't inflate the SD), and the flat-baseline
+    test is relative instead of an absolute 1e-6.
+  - `correct_bleaching` and the Huber regression no longer depend on the units of the recording
+    (the same data ×1000 gave a baseline up to 4.5% different, and a Huber inlier fraction of 0.2%).
+  Changed:
+  - `find_significant_peaks` and `find_peak_near_events`: the default `z_threshold` is now 5 (was
+    2.5). The response search takes the largest z in the window, so 2.5 reported a "response" for
+    about 58% of random pseudo-events on a real recording (10% at 5).
+  - License: declared as AGPL-3.0-only in `pyproject.toml`, `README.md` and `CITATION.cff`, matching
+    the `LICENSE` file. Earlier releases' PyPI metadata said MIT while the shipped LICENSE was
+    AGPL-3.0. `pyproject.toml` now asks for `setuptools>=77`, the version that understands that field.
+  - `API_REFERENCE.md` brought in line with the code: the new defaults, the meaning of `raw` / `f0`,
+    the z-score baseline, and the `regression_method` default shown as `"ols"` (it still said
+    `"ransac"`).
+  - Docstrings and the README say PyAT instead of "Physics Analysis GUI".
+  New:
+  - `tests/`: 136 automated tests (`python -m unittest discover -s tests`). Each checks an analytic
+    result, an independent reference (statsmodels, scipy) or a simulated recording with a known true
+    ΔF/F. `.github/workflows/tests.yml` runs them on pushes to `main` and on pull requests.
+  - `CITATION.cff` (GitHub's "Cite this repository").
+
+---
+
 ## Version 2026.9.22:
   New:
   - `compute_dff(y_465, y_415, fs, regression_method)` factored out of `process_tdt_folder` —

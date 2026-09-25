@@ -1,7 +1,7 @@
 """
 PhysicsLibrary
 --------------
-Data processing and analysis library for Physics Analysis GUI.
+Data processing and analysis library for PyAT (Python Analysis Tool).
 """
 
 from importlib.metadata import version as _version, PackageNotFoundError

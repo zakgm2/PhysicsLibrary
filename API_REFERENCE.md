@@ -78,13 +78,13 @@ checked first (proprietary extensions), then Oxysoft (`.txt` marker).
 Same, for a single file rather than a folder. Currently only recognizes
 Oxysoft `.txt` exports.
 
-### `load\_dataset(folder\_path, fmt=None, regression\_method="ransac") -> Dataset`
+### `load\_dataset(folder\_path, fmt=None, regression\_method="ols") -> Dataset`
 
 Top-level dispatcher — detects the format (unless `fmt` is given
 explicitly) and routes to the matching loader.
 
 * `regression\_method` (`"ransac" | "huber" | "ols"`): TDT-only, forwarded
-to the motion-correction step (see [`process\_tdt\_folder`](#process_tdt_folderfolder_path-regression_methodransac)). Ignored for Oxysoft, which has no
+to the motion-correction step (see [`process\_tdt\_folder`](#process_tdt_folderfolder_path-regression_methodols)). Ignored for Oxysoft, which has no
 such correction step.
 
 ### `load\_dataset\_file(file\_path: str) -> Dataset`
@@ -127,11 +127,13 @@ stored as little-endian float32 after a `LAER` marker). Returns a 2D
 
 ## TDT Photometry Processing
 
-### `process\_tdt\_folder(folder\_path, regression\_method="ransac")`
+### `process\_tdt\_folder(folder\_path, regression\_method="ols")`
 
 The full photometry pipeline, and the main TDT entry point: load block →
 extract 465nm signal (+ optional 415nm isosbestic reference) → motion
-correction → bleaching correction → ΔF/F → denoise → event markers.
+correction → bleaching baseline → ΔF/F → denoise → event markers.
+ΔF/F is the motion-corrected residual divided by the 465 channel's
+bleaching baseline (`f0`); everything is computed in float64.
 
 * `regression\_method` (`"ransac" | "huber" | "ols"`, see
 [`REGRESSION\_METHODS`](#regression_methods) below) — which regression the
@@ -142,9 +144,9 @@ isosbestic-vs-signal motion correction uses.
 |key|meaning|
 |-|-|
 |`x`|time vector|
-|`raw`|corrected fluorescence signal|
+|`raw`|motion-corrected fluorescence, in the recording's own units: the 465 minus its isosbestic-predicted motion component (the 465 itself if there is no 415 stream)|
 |`corr` / `dff`|final ΔF/F (denoised) — `dff` is an alias for `corr`|
-|`f0`|bleaching baseline|
+|`f0`|baseline fluorescence: the 465 channel's photobleaching trend, the denominator of ΔF/F|
 |`fs`|sampling frequency|
 |`store`|signal label|
 |`markers`|behavioral event markers (see [`get\_event\_markers`](#get_event_markersdata))|
@@ -271,6 +273,13 @@ Extracts and z-scores a window around one event time. Accepts either a
 symmetric `window` (split evenly) or an asymmetric `pre`/`post` pair
 (`pre`/`post` take precedence if both are given).
 
+The baseline is the pre-event part of the window. Its mean/SD are taken
+after pulling any sample further than 5 robust SDs (1.4826 × MAD) from the
+baseline median in to that limit, so a brief artifact can't inflate the SD
+and flatten the whole trial. The samples being scored are never altered
+(no clipping), and the result does not depend on the units of the signal.
+A flat baseline returns all zeros.
+
 #### `compute\_event\_zscore\_peth(time\_array, signal, event\_times, pre, post, num\_bins=300) -> dict`
 
 Z-scores and aligns **every occurrence** of one event type into a
@@ -328,25 +337,34 @@ parameters. Returns `{"popt", "y\_fit", "r2", "success", "error"}`.
 
 ### Peak detection
 
-#### `find\_significant\_peaks(time\_array, signal, z\_threshold=2.5, min\_distance\_sec=1.0, include\_troughs=False) -> list\[dict]`
+#### `find\_significant\_peaks(time\_array, signal, z\_threshold=5.0, min\_distance\_sec=1.0, include\_troughs=False) -> list\[dict]`
 
 Auto-detects statistically significant transients directly from the
 signal — instead of trusting that externally-supplied event markers
 actually line up with real activity. Z-scores the whole recording
 against its own global mean/std (not per-event), then `scipy.signal.find\_peaks`
-picks local maxima at or above `z\_threshold`, at least `min\_distance\_sec`
-apart. `include\_troughs` also detects significant negative deflections
+picks local maxima at or above `z\_threshold` (default 5, the usual
+five-sigma convention), at least `min\_distance\_sec` apart.
+`include\_troughs` also detects significant negative deflections
 (off by default).
 
 **Returns** `\[{"time", "z\_score", "kind": "peak"|"trough"}, ...]`, sorted
 by time.
 
-#### `find\_peak\_near\_events(time\_array, signal, event\_times, pre, post, z\_threshold=2.5, include\_troughs=False) -> list\[dict]`
+#### `find\_peak\_near\_events(time\_array, signal, event\_times, pre, post, z\_threshold=5.0, include\_troughs=False) -> list\[dict]`
 
 Checks whether a significant peak actually shows up near each given
 event time (baselined the same way as `get\_zscore\_slice`, i.e. relative
 to that event's own local baseline — not the whole recording). Works for
 one event or many occurrences of the same type.
+
+The default `z\_threshold` of 5 is deliberately strict: the search takes
+the *largest* z over every sample in the `pre`/`post` window, so a low
+threshold reports a "response" by chance in most windows. On a real
+fibre-photometry recording searched the way PyAT does it (0.5 s-smoothed
+ΔF/F, 5 s baseline, 10 s response window), random pseudo-events were
+reported as having a response 58% of the time at 2.5, 40% at 3, 21% at 4
+and 10% at 5; the exact rates depend on the window lengths.
 
 **Returns** one dict per `event\_time` (same order):
 `{"event\_time", "found", "peak\_time", "latency", "z\_score", "kind"}` —

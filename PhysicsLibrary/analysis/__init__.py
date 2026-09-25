@@ -1,7 +1,7 @@
 """
 analysis
 --------
-Format-agnostic analysis routines for Physics Analysis GUI, one file per
+Format-agnostic analysis routines for PyAT, one file per
 tool (mirrors physicsanalysis_qt/analysis/'s own layout):
 
   shared.py       - estimate_sample_rate, mean_channels, smooth_signal

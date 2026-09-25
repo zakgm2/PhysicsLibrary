@@ -1,14 +1,15 @@
 [build-system]
-requires = ["setuptools>=61"]
+# 77+ for the SPDX-string `license` / `license-files` fields below (PEP 639).
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "ZaksPhysicsLibrary"
-version = "2026.9.22"
+version = "2026.9.24"
 description = "Data processing and analysis library for TDT, Oxysoft NIRS, Terranova EFNMR lab data, and text-field studies"
 requires-python = ">=3.10"
 readme = "README.md"
-license = "MIT"
+license = "AGPL-3.0-only"
 license-files = ["LICENSE"]
 authors = [
     { name = "zakgm2" },

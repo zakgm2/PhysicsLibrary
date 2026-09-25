@@ -1,6 +1,6 @@
 # PhysicsLibrary
 
-Data processing and analysis library backing [PhysicsAnalysis](https://github.com/zakgm2/PhysicsAnalysis) — file parsing, signal processing, and curve-fitting logic, with no GUI code of its own. Any interface (tkinter, PyQt6, a script, a notebook) can sit on top of it.
+Data processing and analysis library backing [PyAT (Python Analysis Tool)](https://github.com/zakgm2/PyAT) — file parsing, signal processing, and curve-fitting logic, with no GUI code of its own. Any interface (tkinter, PyQt6, a script, a notebook) can sit on top of it.
 
 ---
 
@@ -150,3 +150,9 @@ Everything importable from `PhysicsLibrary` directly:
 | Curve fit models | `linear_model`, `single_exponential_model`, `exponential_rise_model`, `double_exponential_model`, `gaussian_model`, `sinusoidal_model`, `visibility_model` |
 | Text field study | `run_field_study_pipeline`, `load_field_study_folder`, `peek_fields`, `flag_low_quality`, `embed_text_fields`, `compute_delta_vector`, `compute_paired_similarity`, `permutation_test_similarity`, `wordcount_confound_check` |
 | Field study validation | `run_validation_pipeline`, `build_validation_summary`, `cohens_d`, `benjamini_hochberg`, `wordcount_controlled_regression`, `bootstrap_mean_ci`, `leave_one_out_sensitivity` |
+
+---
+
+## License
+
+AGPL-3.0 — see [LICENSE](LICENSE) for details.

@@ -100,15 +100,32 @@ def _robust_linear_fit(x, y, method="ols"):
     if method not in REGRESSION_METHODS:
         raise ValueError(f"Unknown regression method {method!r}; expected one of {REGRESSION_METHODS}")
 
+    # TDT streams arrive as float32, and np.polyfit on float32 data silently
+    # drops the slope term once the recording is long: it discards singular
+    # values below n * float32-eps, so as soon as n * 1.2e-7 exceeds the ratio
+    # of the 415 channel's spread to its mean (~200,000 samples for a channel
+    # of 25 +/- 1, i.e. ~3 minutes at 1 kHz) it returns a line at roughly half
+    # the true slope with a large intercept, with only a RankWarning. Fit in
+    # float64.
+    x = np.asarray(x, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64)
+
     if method == "ols":
         a, b = np.polyfit(x, y, 1)
         return float(a), float(b), 1.0
 
     if method == "huber":
+        # Fit on standardised data and map the line back: sklearn's optimiser
+        # starts from a fixed unit scale and its L2 penalty is not scale-free,
+        # so on data much larger than ~1 it stops after a few iterations with
+        # a poor line and a meaningless inlier fraction (0.2% on data x1000).
+        mx, my = np.median(x), np.median(y)
+        sx = 1.4826 * np.median(np.abs(x - mx)) or 1.0
+        sy = 1.4826 * np.median(np.abs(y - my)) or 1.0
         model = HuberRegressor()
-        model.fit(x.reshape(-1, 1), y)
-        a = float(model.coef_[0])
-        b = float(model.intercept_)
+        model.fit(((x - mx) / sx).reshape(-1, 1), (y - my) / sy)
+        a = float(model.coef_[0]) * sy / sx
+        b = my + sy * float(model.intercept_) - a * mx
         inlier_fraction = float(np.mean(~model.outliers_))
         return a, b, inlier_fraction
 
@@ -181,23 +198,42 @@ def compute_dff(y_465, y_415, fs, regression_method="ols"):
 
     Returns
     -------
-    dict with raw (motion-corrected fluorescence), corr/dff (denoised
-    ΔF/F), f0 (bleaching baseline), motion_correction_inlier_fraction
-    (None if y_415 is None) — the same subset of process_tdt_folder's
-    own return dict that actually depends on this computation.
+    dict with raw (motion-corrected fluorescence: with a 415 stream, the 465
+    minus its isosbestic-predicted motion component, i.e. ΔF in the
+    recording's own units), corr/dff (denoised ΔF/F), f0 (baseline
+    fluorescence, the photobleaching trend of the 465 stream — the
+    denominator of ΔF/F), motion_correction_inlier_fraction (None if y_415
+    is None) — the same subset of process_tdt_folder's own return dict that
+    actually depends on this computation.
     """
+    # ΔF/F is (F - F0) / F0 with F0 the baseline FLUORESCENCE. With a 415
+    # stream, the motion-corrected residual (465 minus its isosbestic-
+    # predicted motion component) already IS F - F0, so it is divided by the
+    # 465's own bleaching baseline. (Running correct_bleaching on the
+    # residual itself and normalising by that, as this function used to,
+    # divides by a near-zero number and gives a value that isn't a ΔF/F —
+    # its scale and offset changed by orders of magnitude with the choice of
+    # regression method.) Without a 415 stream there is no motion term to
+    # remove, so the trace's own trend is F0.
+    #
+    # Everything is done in float64: TDT hands over float32, and the fit (see
+    # _robust_linear_fit) is not safe in single precision.
+    y_465 = np.asarray(y_465, dtype=np.float64)
     if y_415 is not None:
+        y_415 = np.asarray(y_415, dtype=np.float64)
         a, b, inlier_fraction = _robust_linear_fit(y_415, y_465, method=regression_method)
         y_fit = a * y_415 + b
         y_final = y_465 - y_fit
+        _, trend = correct_bleaching(y_465, fs)
+        f0  = np.maximum(trend, 1e-6)
+        dff = y_final / f0
     else:
         y_final = y_465
         inlier_fraction = None
+        _, trend = correct_bleaching(y_final, fs)
+        f0  = np.maximum(trend, 1e-6)
+        dff = (y_final - f0) / f0
 
-    _, trend = correct_bleaching(y_final, fs)
-
-    f0  = np.maximum(trend, 1e-6)
-    dff = (y_final - f0) / f0
     dff = denoise_signal(dff, fs, cutoff=5)
 
     return {
@@ -435,6 +471,14 @@ def correct_bleaching(y, fs):
     if len(y_fit) < 100:
         return y, np.zeros_like(y)
 
+    # Fit in units of the signal's own size and scale the trend back
+    # afterwards: curve_fit's optimiser isn't scale-free (it converged to a
+    # baseline up to ~4.5% different for the same recording expressed x1000).
+    scale = np.max(np.abs(y_fit))
+    if not np.isfinite(scale) or scale <= 0:
+        scale = 1.0
+    y_fit = y_fit / scale
+
     k_guess   = np.percentile(y_fit, 10)
     total_amp = np.max(y_fit) - k_guess
     p0        = [total_amp * 0.6, 0.05, total_amp * 0.4, 0.0001, k_guess]
@@ -444,7 +488,7 @@ def correct_bleaching(y, fs):
     try:
         popt, _ = curve_fit(double_exponential, x_fit, y_fit, p0=p0,
                             bounds=(lower, upper), maxfev=10000)
-        trend = double_exponential(x, *popt)
+        trend = scale * double_exponential(x, *popt)
     except Exception:
         # curve_fit failed — fall back to log-linear fit as a rough trend estimate
         import warnings
@@ -453,7 +497,7 @@ def correct_bleaching(y, fs):
             RuntimeWarning, stacklevel=2,
         )
         coeffs = np.polyfit(x_fit, np.log(np.maximum(y_fit, 1e-6)), 1)
-        trend  = np.exp(np.polyval(coeffs, x))
+        trend  = scale * np.exp(np.polyval(coeffs, x))
 
     corrected = y - trend + trend[0]
     return corrected, trend

@@ -4,8 +4,8 @@ analysis/zscore_peth.py
 Single-click Z-Score PETH: extract and z-score a window around one
 event. get_zscore_slice is also the shared building block event_peth.py
 and peak_finder.py call per-event/per-trial, so a bug fix or behavior
-change here (e.g. the artefact clip below) applies everywhere a peri-
-event window gets z-scored, not just this one tool.
+change here (e.g. how the baseline is protected from artefacts) applies
+everywhere a peri-event window gets z-scored, not just this one tool.
 """
 
 import numpy as np
@@ -49,21 +49,41 @@ def get_zscore_slice(time_array, signal, center_t, window=None, pre=None, post=N
     seg_y = signal[start_idx:end_idx]
     seg_x = time_array[start_idx:end_idx]
 
-    # Clip extreme artefacts before z-scoring so outliers don't dominate the baseline std.
-    seg_y = np.clip(seg_y, -5, 5)
-
     # Baseline is the pre-event portion — the part of the window that
     # actually precedes the event, not just "the first half of the segment"
     # (those differ once pre != post).
     baseline_mask   = seg_x < center_t
     baseline_period = seg_y[baseline_mask] if baseline_mask.any() else seg_y
-    mu  = np.mean(baseline_period)
-    std = np.std(baseline_period)
+    mu, std = _baseline_mean_std(baseline_period)
 
-    if std < 1e-6:
+    # "Flat" means the baseline's spread is down at floating-point rounding
+    # level next to its own size — a relative test, so it doesn't depend on
+    # the units the signal is in.
+    scale = np.max(np.abs(baseline_period)) if baseline_period.size else 0.0
+    if std == 0 or std <= 1e-12 * scale:
         return seg_x, np.zeros_like(seg_y)
 
     return seg_x, (seg_y - mu) / std
+
+
+def _baseline_mean_std(baseline, n_robust_sd=5.0):
+    """
+    Mean and SD of a baseline window, protected from artefact samples.
+
+    Samples further than `n_robust_sd` robust standard deviations (1.4826 x
+    the median absolute deviation) from the baseline's median are pulled in
+    to that limit before the mean and SD are taken, so a brief motion spike
+    inside the baseline can't inflate the SD and shrink every z-score in the
+    trial. The limit is relative to the baseline's own spread, so the result
+    is the same whatever units the signal is in, and only the baseline
+    statistics are treated this way — the samples being scored are never
+    altered, so a large real response keeps its real height.
+    """
+    med = np.median(baseline)
+    robust_sd = 1.4826 * np.median(np.abs(baseline - med))
+    if robust_sd > 0:
+        baseline = np.clip(baseline, med - n_robust_sd * robust_sd, med + n_robust_sd * robust_sd)
+    return np.mean(baseline), np.std(baseline)
 
 
 def bin_for_heatmap(z_seg, num_bins=300):
