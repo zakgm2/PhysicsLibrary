@@ -30,16 +30,20 @@ from .loaders.tdt_loader import load_tdt
 from .loaders.oxysoft_loader import load_oxysoft, load_oxysoft_file
 
 
-def load_dataset_file(file_path: str) -> Dataset:
-    """Load a single file and return a Dataset."""
+def load_dataset_file(file_path: str, progress=None) -> Dataset:
+    """Load a single file and return a Dataset.
+
+    progress : None, True or callable(fraction, message)
+        Progress reporting; see PhysicsLibrary.progress.
+    """
     fmt = detect_format_file(file_path)
     if fmt == DataFormat.OXYSOFT:
-        return load_oxysoft_file(file_path)
+        return load_oxysoft_file(file_path, progress=progress)
     raise ValueError(f"Unrecognised file format: {file_path}")
 
 
 def load_dataset(folder_path: str, fmt: Optional[DataFormat] = None,
-                  regression_method: str = "ols") -> Dataset:
+                  regression_method: str = "ols", progress=None) -> Dataset:
     """
     Load a recording folder and return a Dataset.
     If *fmt* is None, detect_format() is called automatically.
@@ -48,6 +52,8 @@ def load_dataset(folder_path: str, fmt: Optional[DataFormat] = None,
         TDT-only — forwarded to load_tdt()/process_tdt_folder() for the
         isosbestic-vs-signal motion-correction regression. Ignored for
         Oxysoft, which has no such correction step.
+    progress : None, True or callable(fraction, message)
+        Progress reporting; see PhysicsLibrary.progress.
     """
     folder_name = os.path.basename(folder_path.rstrip('/\\'))
 
@@ -55,9 +61,9 @@ def load_dataset(folder_path: str, fmt: Optional[DataFormat] = None,
         fmt = detect_format(folder_path)
 
     if fmt is DataFormat.TDT:
-        return load_tdt(folder_path, folder_name, regression_method=regression_method)
+        return load_tdt(folder_path, folder_name, regression_method=regression_method, progress=progress)
     elif fmt is DataFormat.OXYSOFT:
-        return load_oxysoft(folder_path, folder_name)
+        return load_oxysoft(folder_path, folder_name, progress=progress)
     else:
         raise ValueError(
             f"Could not identify a supported data format in: {folder_path}\n"

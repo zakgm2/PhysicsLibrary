@@ -139,3 +139,52 @@ def splice_cut_out(x, raw, corr, markers, detected_markers, start, end, extra_ch
         "extra_channels": {name: np.concatenate([y[..., :i0], y[..., i1:]], axis=-1)
                             for name, y in (extra_channels or {}).items()},
     }
+
+
+MODE_CUT_OUT = "cut_out"
+MODE_KEEP_INSIDE = "keep_inside"
+
+
+def replay_splices(x, splices, markers=None, detected_markers=None):
+    """
+    Replays a saved list of splices on a time axis and marker lists, without
+    touching any signal: the x / marker side of what PyAT does when it restores
+    a recording's splice.json. Group analysis uses it to know where each
+    recording's events sit after the splices, and how long the recording
+    now is, without loading and re-fitting the signal.
+
+    It goes through splice_cut_out / splice_keep_inside themselves (x stands in
+    for the raw and corr arrays they require), so the result is exactly what
+    the full replay gives for x and the markers — including the last-digit
+    details of the time shift, which matter when markers saved after a splice
+    (markers.json) are matched against the re-derived ones.
+
+    Parameters
+    ----------
+    x : array
+        The recording's time axis before any splice.
+    splices : list of {"mode", "start", "end"}
+        In the order they were applied; "mode" is MODE_CUT_OUT ("cut_out") or,
+        for anything else, MODE_KEEP_INSIDE ("keep_inside") — the same reading PyAT
+        gives it. A splice whose range leaves fewer than 2 samples is skipped, as
+        PyAT does (the recording stays as it was before that one).
+    markers, detected_markers : list of dict, optional
+        Each with a 'time' key, on the pre-splice timeline.
+
+    Returns
+    -------
+    dict with x, markers, detected_markers (after the splices) and applied (how
+    many of the splices took effect).
+    """
+    x = np.asarray(x)
+    markers = list(markers or [])
+    detected_markers = list(detected_markers or [])
+    applied = 0
+    for s in splices:
+        splice = splice_cut_out if s["mode"] == MODE_CUT_OUT else splice_keep_inside
+        result = splice(x, x, x, markers, detected_markers, s["start"], s["end"])
+        if result is None:
+            continue
+        x, markers, detected_markers = result["x"], result["markers"], result["detected_markers"]
+        applied += 1
+    return {"x": x, "markers": markers, "detected_markers": detected_markers, "applied": applied}

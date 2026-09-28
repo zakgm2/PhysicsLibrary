@@ -22,6 +22,8 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from .progress import Plan
+
 
 def peek_fields(folder_path, file_glob="P-*.json"):
     """
@@ -46,7 +48,7 @@ def peek_fields(folder_path, file_glob="P-*.json"):
         return list(json.load(fh).keys())
 
 
-def load_field_study_folder(folder_path, text_fields, file_glob="P-*.json"):
+def load_field_study_folder(folder_path, text_fields, file_glob="P-*.json", progress=None):
     """
     Load every file matching file_glob in folder_path into a DataFrame
     (one row per subject) and add a wordcount_<field> column for each
@@ -59,6 +61,8 @@ def load_field_study_folder(folder_path, text_fields, file_glob="P-*.json"):
         Every free-text field to word-count.
     file_glob : str
         Filename pattern within folder_path, e.g. "P-*.json".
+    progress : None, True or callable(fraction, message)
+        Progress reporting, one tick per file; see PhysicsLibrary.progress.
 
     Returns
     -------
@@ -69,7 +73,7 @@ def load_field_study_folder(folder_path, text_fields, file_glob="P-*.json"):
         raise ValueError(f"No files matching '{file_glob}' found in {folder_path}")
 
     records = []
-    for path in paths:
+    for path in Plan(progress, [("Reading study files", 1)]).track("Reading study files", paths):
         with open(path, "r", encoding="utf-8") as fh:
             records.append(json.load(fh))
     df = pd.DataFrame(records)
@@ -115,7 +119,7 @@ def flag_low_quality(df, text_fields, min_words=5):
     return df
 
 
-def embed_text_fields(df, fields, model_name="all-MiniLM-L6-v2"):
+def embed_text_fields(df, fields, model_name="all-MiniLM-L6-v2", progress=None):
     """
     Embed each of `fields` with a sentence-transformers model,
     L2-normalized (so a plain dot product below is the cosine similarity).
@@ -132,12 +136,17 @@ def embed_text_fields(df, fields, model_name="all-MiniLM-L6-v2"):
         paired_fields/delta_pair — no need to embed fields you're not
         actually comparing).
     model_name : str
+    progress : None, True or callable(fraction, message)
+        Progress reporting; see PhysicsLibrary.progress. Loading the model
+        (a download the first time) is one opaque step; each field embedded
+        after it ticks the bar.
 
     Returns
     -------
     dict
         {field: (n_subjects, dim) ndarray, ...}
     """
+    plan = Plan(progress, [("Loading language model", 45), ("Embedding responses", 55)])
     try:
         from sentence_transformers import SentenceTransformer
     except ImportError:
@@ -151,9 +160,10 @@ def embed_text_fields(df, fields, model_name="all-MiniLM-L6-v2"):
             "installed. Install it with: pip install sentence-transformers"
         ) from None
 
+    plan.begin("Loading language model")
     model = SentenceTransformer(model_name)
     embeddings = {}
-    for field in fields:
+    for field in plan.track("Embedding responses", fields):
         texts = df[field].fillna("").astype(str).tolist()
         embeddings[field] = np.asarray(model.encode(texts, normalize_embeddings=True))
     return embeddings
@@ -180,7 +190,7 @@ def compute_delta_vector(embeddings, field_from, field_to):
     return vectors, magnitude
 
 
-def compute_paired_similarity(embeddings, paired_fields, n_null=200, rng_seed=None):
+def compute_paired_similarity(embeddings, paired_fields, n_null=200, rng_seed=None, progress=None):
     """
     Cosine similarity between each pair of fields for the same subject,
     plus a null distribution built by repeatedly shuffling one field's
@@ -205,6 +215,8 @@ def compute_paired_similarity(embeddings, paired_fields, n_null=200, rng_seed=No
     n_null : int
         Number of random shuffles to build the null distribution from.
     rng_seed : int or None
+    progress : None, True or callable(fraction, message)
+        Progress reporting, one tick per pair; see PhysicsLibrary.progress.
 
     Returns
     -------
@@ -223,7 +235,8 @@ def compute_paired_similarity(embeddings, paired_fields, n_null=200, rng_seed=No
     """
     rng = np.random.default_rng(rng_seed)
     results = {}
-    for field_a, field_b, name in paired_fields:
+    for field_a, field_b, name in Plan(progress, [("Comparing field pairs", 1)]).track(
+            "Comparing field pairs", paired_fields):
         vecs_a = embeddings[field_a]
         vecs_b = embeddings[field_b]
         n = vecs_a.shape[0]
@@ -335,7 +348,7 @@ def wordcount_confound_check(df, paired_fields):
 
 def run_field_study_pipeline(folder_path, text_fields, delta_pair=None, paired_fields=None,
                               model_name="all-MiniLM-L6-v2", n_null=200, rng_seed=None,
-                              file_glob="P-*.json", min_words=5):
+                              file_glob="P-*.json", min_words=5, progress=None):
     """
     Full pipeline: load -> flag low-quality responses -> embed -> optional
     delta vector -> optional paired similarity (+ permutation test +
@@ -372,12 +385,19 @@ def run_field_study_pipeline(folder_path, text_fields, delta_pair=None, paired_f
     min_words : int
         Fields with fewer words than this get flagged (not dropped) —
         see flag_low_quality.
+    progress : None, True or callable(fraction, message)
+        Progress reporting; see PhysicsLibrary.progress. Loading the
+        embedding model (a download the first time) is by far the longest
+        step, then embedding each field.
 
     Returns
     -------
     pandas.DataFrame
     """
-    df = load_field_study_folder(folder_path, text_fields, file_glob=file_glob)
+    plan = Plan(progress, [("Reading study files", 5), ("Embedding responses", 75),
+                           ("Comparing field pairs", 15), ("Checking word-count confounds", 5)])
+    df = load_field_study_folder(folder_path, text_fields, file_glob=file_glob,
+                                progress=plan.sub("Reading study files"))
     df = flag_low_quality(df, text_fields, min_words=min_words)
 
     # Only embed fields actually referenced by delta_pair/paired_fields —
@@ -388,7 +408,8 @@ def run_field_study_pipeline(folder_path, text_fields, delta_pair=None, paired_f
         fields_to_embed.update(delta_pair)
     for field_a, field_b, _ in (paired_fields or []):
         fields_to_embed.update([field_a, field_b])
-    embeddings = embed_text_fields(df, sorted(fields_to_embed), model_name=model_name)
+    embeddings = embed_text_fields(df, sorted(fields_to_embed), model_name=model_name,
+                                   progress=plan.sub("Embedding responses"))
 
     if delta_pair is not None:
         field_from, field_to = delta_pair
@@ -396,7 +417,8 @@ def run_field_study_pipeline(folder_path, text_fields, delta_pair=None, paired_f
         df["delta_magnitude"] = magnitude
 
     if paired_fields:
-        results = compute_paired_similarity(embeddings, paired_fields, n_null=n_null, rng_seed=rng_seed)
+        results = compute_paired_similarity(embeddings, paired_fields, n_null=n_null, rng_seed=rng_seed,
+                                            progress=plan.sub("Comparing field pairs"))
         for name, result in results.items():
             df[f"sim_{name}"] = result["same_subject_similarity"]
             df[f"null_mean_{name}"] = result["null_mean"]
@@ -408,9 +430,11 @@ def run_field_study_pipeline(folder_path, text_fields, delta_pair=None, paired_f
             df[f"pvalue_{name}"] = test["p_value"]
             df[f"effect_size_{name}"] = test["effect_size"]
 
+        plan.begin("Checking word-count confounds")
         confound = wordcount_confound_check(df, paired_fields)
         for name, result in confound.items():
             df[f"wc_confound_r_{name}"] = result["r"]
             df[f"wc_confound_p_{name}"] = result["p_value"]
 
+    plan.done()
     return df

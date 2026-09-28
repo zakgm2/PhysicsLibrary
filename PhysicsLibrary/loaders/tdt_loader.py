@@ -11,13 +11,18 @@ from .. import processing_TDT
 from ..dataset import Dataset
 
 
-def load_tdt(folder_path: str, folder_name: str, regression_method: str = "ols") -> Dataset:
-    """Load a TDT tank using the existing validate + process pipeline."""
+def load_tdt(folder_path: str, folder_name: str, regression_method: str = "ols", progress=None) -> Dataset:
+    """Load a TDT tank using the existing validate + process pipeline.
+
+    `progress` (None, True or callable(fraction, message); see
+    PhysicsLibrary.progress) is handed to process_tdt_folder.
+    """
     valid, msg = processing_TDT.validate_tdt_folder(folder_path)
     if not valid:
         raise ValueError(f"TDT validation failed: {msg}")
 
-    result     = processing_TDT.process_tdt_folder(folder_path, regression_method=regression_method)
+    result     = processing_TDT.process_tdt_folder(folder_path, regression_method=regression_method,
+                                                    progress=progress)
     signals    = result["corr"]
     signals_2d = signals[np.newaxis, :]
     fs         = float(result["fs"])

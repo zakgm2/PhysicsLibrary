@@ -16,6 +16,12 @@ tool (mirrors physicsanalysis_qt/analysis/'s own layout):
   peak_finder.py  - find_significant_peaks, find_peak_near_events
   curve_fit.py    - compute_slope_segment, fit_model_to_segment
   intervals.py    - compute_marker_intervals
+  group.py        - group analysis across recordings: GroupSpec (the settings), marker_index /
+                    common_markers / design_summary (what the recordings share, trials per subject)
+  group_trials.py - extract_group_trials: the window around each event of a marker, baseline-corrected,
+                    reduced to AUC / peak / mean / latency / decay time
+  group_stats.py  - fit_group_models: mixed-effects models and pairwise comparisons (GroupResults)
+  group_report.py - write_group_results, report_text: the tables as CSV and a text report
 
 This __init__ just re-exports every public name under the same
 `PhysicsLibrary.analysis` namespace the single-file version used to
@@ -57,4 +63,23 @@ from .curve_fit import (
 )
 from .intervals import (
     compute_marker_intervals,
+)
+from .group import (
+    GroupSpec,
+    marker_index,
+    common_markers,
+    design_summary,
+)
+from .group_trials import (
+    extract_group_trials,
+    measures_for_trial,
+    decay_time,
+)
+from .group_stats import (
+    fit_group_models,
+    GroupResults,
+)
+from .group_report import (
+    write_group_results,
+    report_text as group_report_text,
 )

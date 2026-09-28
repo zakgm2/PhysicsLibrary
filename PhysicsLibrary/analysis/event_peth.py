@@ -13,6 +13,7 @@ for the actual per-row integration rather than duplicating it.
 
 import numpy as np
 
+from ..progress import Plan
 from .zscore_peth import get_zscore_slice
 from .auc import compute_auc_from_trace
 
@@ -50,7 +51,7 @@ def compute_group_stats(trial_matrix):
     return mean_trace, sem_trace
 
 
-def compute_event_zscore_peth(time_array, signal, event_times, pre, post, num_bins=300):
+def compute_event_zscore_peth(time_array, signal, event_times, pre, post, num_bins=300, progress=None):
     """
     Z-score and align every occurrence of one event type into a
     trial x time matrix, for a stacked-heatmap + trial-average PETH view
@@ -76,6 +77,8 @@ def compute_event_zscore_peth(time_array, signal, event_times, pre, post, num_bi
         Seconds before/after each event to include.
     num_bins : int
         Number of points each trial is resampled to.
+    progress : None, True or callable(fraction, message)
+        Progress reporting, one tick per event; see PhysicsLibrary.progress.
 
     Returns
     -------
@@ -91,7 +94,7 @@ def compute_event_zscore_peth(time_array, signal, event_times, pre, post, num_bi
     time_axis = np.linspace(-pre, post, num_bins)
     rows = []
     valid_times = []
-    for t in event_times:
+    for t in Plan(progress, [("Aligning trials", 1)]).track("Aligning trials", event_times):
         seg_x, seg_z = get_zscore_slice(time_array, signal, t, pre=pre, post=post)
         if seg_x is None or len(seg_x) < 2:
             continue

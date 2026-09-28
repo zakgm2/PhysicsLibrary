@@ -2,6 +2,35 @@
 
 ---
 
+## Version 2026.9.27:
+  New:
+  - Group analysis (Hypothesis Testing across recordings): `analysis/group.py` (`GroupSpec`,
+    `marker_index`, `common_markers`, `design_summary`), `analysis/group_trials.py`
+    (`extract_group_trials`, `measures_for_trial`, `decay_time`), `analysis/group_stats.py`
+    (`fit_group_models` -> `GroupResults`) and `analysis/group_report.py`
+    (`write_group_results`, `group_report_text`). Fits a linear mixed-effects model
+    (statsmodels `MixedLM`, REML, Powell/Nelder-Mead optimizer) per measure (AUC, peak
+    amplitude, mean amplitude, latency to peak, decay time) with random intercepts for
+    subject and subject x marker, then Holm-corrected pairwise post hoc comparisons using
+    subject-based degrees of freedom rather than statsmodels' own Wald z. A single-marker
+    design tests AUC/mean amplitude against zero (peak/latency/decay have no null value and
+    are reported as estimates with 95% CIs only). Every fit is cross-checked against subject
+    x marker means as an independence-free sanity check. New dependencies: `statsmodels`,
+    `scikit-learn`. 92 new tests across `tests/test_group_setup.py`,
+    `tests/test_group_trials.py` and `tests/test_group_stats.py` (262 total, including the
+    34 progress-toast tests below).
+  - `progress.py` (`Plan`, `track`): a small `tqdm`-based progress-reporting helper. Thirteen
+    slow functions (loaders, splice, motion correction, Event PETH, Peak Finder, text-field
+    study/validation) accept `progress=None|True|callable` to report percent-complete without
+    printing to stdout when driven by a GUI. New dependency: `tqdm`. 34 new tests in
+    `tests/test_progress.py`.
+  - `get_tdt_struct` accepts `read_streams=` to skip loading stream data when only marker/epoc
+    structure is needed (used by group analysis's marker-scan step to stay fast on long
+    recordings), and `replay_splices` reapplies a recording's saved splice history to a
+    freshly loaded struct.
+
+---
+
 ## Version 2026.9.24:
   Fixed:
   - Motion correction is now fitted in float64. TDT delivers float32, and `np.polyfit` on float32

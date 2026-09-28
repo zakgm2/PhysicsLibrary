@@ -24,6 +24,8 @@ from typing import Optional
 
 import numpy as np
 
+from .progress import Plan
+
 
 # ---------------------------------------------------------------------------
 # Public data structure
@@ -41,36 +43,42 @@ class GenericTable:
 # Public entry point
 # ---------------------------------------------------------------------------
 
-def load_any_file(path: str) -> list[GenericTable]:
+def load_any_file(path: str, progress=None) -> list[GenericTable]:
     """
     Parse *path* and return every detected table.
     Raises ValueError if nothing useful is found.
+
+    progress : None, True or callable(fraction, message)
+        Progress reporting; see PhysicsLibrary.progress. Excel reports per
+        sheet after opening the workbook; delimited text reports per row.
     """
     ext = os.path.splitext(path)[1].lower()
     if ext in ('.xlsx', '.xls'):
-        return _parse_excel(path)
+        return _parse_excel(path, progress=progress)
     elif ext == '.csv':
-        return _parse_delimited(path, delimiter=',')
+        return _parse_delimited(path, delimiter=',', progress=progress)
     elif ext == '.tsv':
-        return _parse_delimited(path, delimiter='\t')
+        return _parse_delimited(path, delimiter='\t', progress=progress)
     else:
-        return _parse_text(path)
+        return _parse_text(path, progress=progress)
 
 
 # ---------------------------------------------------------------------------
 # Excel
 # ---------------------------------------------------------------------------
 
-def _parse_excel(path: str) -> list[GenericTable]:
+def _parse_excel(path: str, progress=None) -> list[GenericTable]:
     try:
         import openpyxl
     except ImportError:
         raise ImportError("Install openpyxl to read .xlsx files:  pip install openpyxl")
 
+    plan = Plan(progress, [("Opening workbook", 45), ("Reading sheets", 55)])
+    plan.begin("Opening workbook")
     wb = openpyxl.load_workbook(path, data_only=True)
     tables: list[GenericTable] = []
 
-    for sheet_name in wb.sheetnames:
+    for sheet_name in plan.track("Reading sheets", wb.sheetnames):
         ws = wb[sheet_name]
         # Load full sheet into a 2-D list, trim trailing all-None rows
         grid: list[list] = [list(row) for row in ws.iter_rows(values_only=True)]
@@ -205,12 +213,15 @@ def _col_letter(i: int) -> str:
 # CSV / TSV
 # ---------------------------------------------------------------------------
 
-def _parse_delimited(path: str, delimiter: str) -> list[GenericTable]:
+def _parse_delimited(path: str, delimiter: str, progress=None) -> list[GenericTable]:
+    plan = Plan(progress, [("Reading file", 15), ("Building table", 85)])
+    plan.begin("Reading file")
     with open(path, 'r', encoding='utf-8', errors='replace') as fh:
         rows = [r for r in csv.reader(fh, delimiter=delimiter)]
     if not rows:
         return []
-    t = _rows_to_table(rows, os.path.basename(path))
+    t = _rows_to_table(rows, os.path.basename(path), progress=plan.sub("Building table"))
+    plan.done()
     return [t] if t is not None else []
 
 
@@ -218,7 +229,7 @@ def _parse_delimited(path: str, delimiter: str) -> list[GenericTable]:
 # Plain text (sniff delimiter)
 # ---------------------------------------------------------------------------
 
-def _parse_text(path: str) -> list[GenericTable]:
+def _parse_text(path: str, progress=None) -> list[GenericTable]:
     with open(path, 'r', encoding='utf-8', errors='replace') as fh:
         sample = fh.read(8192)
 
@@ -226,7 +237,7 @@ def _parse_text(path: str) -> list[GenericTable]:
     counts = {'\t': sample.count('\t'), ',': sample.count(','), ';': sample.count(';')}
     best = max(counts, key=counts.get)
     if counts[best] > 0:
-        return _parse_delimited(path, best)
+        return _parse_delimited(path, best, progress=progress)
 
     # Last resort: numpy whitespace splitting
     try:
@@ -243,13 +254,17 @@ def _parse_text(path: str) -> list[GenericTable]:
 # Helpers shared by CSV / text paths
 # ---------------------------------------------------------------------------
 
-def _rows_to_table(rows: list[list[str]], name: str) -> Optional[GenericTable]:
+def _rows_to_table(rows: list[list[str]], name: str, progress=None) -> Optional[GenericTable]:
     if not rows:
         return None
 
+    # Both passes below touch every cell in Python, so on a large file they are
+    # what takes the time: they are the two stages the progress follows.
+    plan = Plan(progress, [("Finding the header row", 40), ("Converting to numbers", 60)])
+
     # Find header row: last row where >= 50 % of non-empty cells are non-numeric
     header_row = 0
-    for ri, row in enumerate(rows):
+    for ri, row in plan.track("Finding the header row", enumerate(rows), total=len(rows)):
         non_empty = [c for c in row if c.strip()]
         if not non_empty:
             continue
@@ -260,7 +275,7 @@ def _rows_to_table(rows: list[list[str]], name: str) -> Optional[GenericTable]:
     headers = [c.strip() or f"Col{i + 1}" for i, c in enumerate(rows[header_row])]
 
     float_grid: list[list[float]] = []
-    for row in rows[header_row + 1:]:
+    for row in plan.track("Converting to numbers", rows[header_row + 1:]):
         if not any(c.strip() for c in row):
             continue
         converted = []

@@ -13,6 +13,8 @@ except PackageNotFoundError:
 
 from .file_parser_generic import load_any_file
 
+from .progress import Plan, track
+
 from .dataset import (
     detect_format,
     detect_format_file,
@@ -32,6 +34,7 @@ from .processing_TDT import (
     compute_dff,
     validate_tdt_folder,
     get_tdt_struct,
+    scan_tdt_markers,
     get_plot_data,
     correct_bleaching,
     denoise_signal,
@@ -60,11 +63,23 @@ from .analysis import (
     compute_auc_matrix,
     compute_peri_event_from_trace,
     compute_peri_event_matrix,
+    GroupSpec,
+    marker_index,
+    common_markers,
+    design_summary,
+    extract_group_trials,
+    measures_for_trial,
+    decay_time,
+    fit_group_models,
+    GroupResults,
+    write_group_results,
+    group_report_text,
 )
 
 from .splice import (
     splice_keep_inside,
     splice_cut_out,
+    replay_splices,
 )
 
 from .models import (

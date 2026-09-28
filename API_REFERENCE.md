@@ -27,9 +27,11 @@ Install: `pip install ZaksPhysicsLibrary`
   * [Area under the curve](#area-under-the-curve)
   * [Peri-event statistics](#peri-event-statistics)
 * [Non-destructive splicing](#non-destructive-splicing)
+* [Group analysis](#group-analysis)
 * [Curve-fit models](#curve-fit-models)
 * [Text Field Study](#text-field-study)
 * [Text Field Study — Statistical Validation](#text-field-study--statistical-validation)
+* [Progress reporting](#progress-reporting)
 * [Optional dependencies](#optional-dependencies)
 
 \---
@@ -78,21 +80,21 @@ checked first (proprietary extensions), then Oxysoft (`.txt` marker).
 Same, for a single file rather than a folder. Currently only recognizes
 Oxysoft `.txt` exports.
 
-### `load\_dataset(folder\_path, fmt=None, regression\_method="ols") -> Dataset`
+### `load\_dataset(folder\_path, fmt=None, regression\_method="ols", progress=None) -> Dataset`
 
 Top-level dispatcher — detects the format (unless `fmt` is given
 explicitly) and routes to the matching loader.
 
 * `regression\_method` (`"ransac" | "huber" | "ols"`): TDT-only, forwarded
-to the motion-correction step (see [`process\_tdt\_folder`](#process_tdt_folderfolder_path-regression_methodols)). Ignored for Oxysoft, which has no
+to the motion-correction step (see [`process\_tdt\_folder`](#process_tdt_folderfolder_path-regression_methodols-progressnone)). Ignored for Oxysoft, which has no
 such correction step.
 
-### `load\_dataset\_file(file\_path: str) -> Dataset`
+### `load\_dataset\_file(file\_path: str, progress=None) -> Dataset`
 
 Loads a single file (rather than a folder) into a `Dataset`. Currently
 supports Oxysoft `.txt` exports.
 
-### `load\_any\_file(path: str) -> list\[GenericTable]`
+### `load\_any\_file(path: str, progress=None) -> list\[GenericTable]`
 
 Best-effort parser for arbitrary tabular data — `.xlsx`/`.xls` (needs
 `openpyxl`), `.csv`, `.tsv`, or `.txt`/`.dat` with a sniffed delimiter.
@@ -127,7 +129,7 @@ stored as little-endian float32 after a `LAER` marker). Returns a 2D
 
 ## TDT Photometry Processing
 
-### `process\_tdt\_folder(folder\_path, regression\_method="ols")`
+### `process\_tdt\_folder(folder\_path, regression\_method="ols", progress=None)`
 
 The full photometry pipeline, and the main TDT entry point: load block →
 extract 465nm signal (+ optional 415nm isosbestic reference) → motion
@@ -183,12 +185,31 @@ recording rather than concentrated in a few bad stretches.
 Checks whether a directory contains a valid TDT recording block. Returns
 `(True, folder\_name)` if valid, `(False, error\_message)` if not.
 
-### `get\_tdt\_struct(path)`
+### `get\_tdt\_struct(path, progress=None, read\_streams=True)`
 
 Loads the raw TDT block (streams, epocs, scalars) via the `tdt` SDK.
 Handles a real SDK bug around epoc stores with mismatched onset/offset
 counts by reading each epoc store with its own fresh call rather than
-all at once.
+all at once. `read\_streams=False` skips the streams (the slow part) and
+still reads the block's info, scalars and epoc stores.
+
+### `scan\_tdt\_markers(folder\_path, splices=None, progress=None) -> dict`
+
+Lists a TDT block's event markers **without processing the recording** —
+no ΔF/F, and the streams are only read when `splices` need the time axis.
+About a third of a second per block, against about two seconds to process
+it. `splices` (optional): the recording's saved splices, a list of
+`{"mode", "start", "end"}`, applied to the marker times and the recording's
+span exactly as PyAT does when it restores `splice.json` (see
+`replay\_splices`).
+
+**Returns** `{"markers", "t\_range", "n\_splices", "block\_name", "start\_time"}`:
+`markers` is what `get\_event\_markers` returns (after the splices);
+`t\_range` is `(first, last)` sample time — exact when splices were given,
+otherwise `(0, the block's recorded duration)`, which can run a few
+hundredths of a second past the last sample — or `None` if the block does
+not say how long it is; `n\_splices` is how many splices took effect;
+`block\_name` is Synapse's `Subject-YYMMDD-HHMMSS`.
 
 ### `get\_plot\_data(data, store\_name, channel=0, max\_points=None) -> (time, signal, fs)`
 
@@ -280,7 +301,7 @@ and flatten the whole trial. The samples being scored are never altered
 (no clipping), and the result does not depend on the units of the signal.
 A flat baseline returns all zeros.
 
-#### `compute\_event\_zscore\_peth(time\_array, signal, event\_times, pre, post, num\_bins=300) -> dict`
+#### `compute\_event\_zscore\_peth(time\_array, signal, event\_times, pre, post, num\_bins=300, progress=None) -> dict`
 
 Z-scores and aligns **every occurrence** of one event type into a
 trial × time matrix (GuPPy-style), for a stacked-heatmap + trial-average
@@ -351,7 +372,7 @@ five-sigma convention), at least `min\_distance\_sec` apart.
 **Returns** `\[{"time", "z\_score", "kind": "peak"|"trough"}, ...]`, sorted
 by time.
 
-#### `find\_peak\_near\_events(time\_array, signal, event\_times, pre, post, z\_threshold=5.0, include\_troughs=False) -> list\[dict]`
+#### `find\_peak\_near\_events(time\_array, signal, event\_times, pre, post, z\_threshold=5.0, include\_troughs=False, progress=None) -> list\[dict]`
 
 Checks whether a significant peak actually shows up near each given
 event time (baselined the same way as `get\_zscore\_slice`, i.e. relative
@@ -449,6 +470,174 @@ are shifted by the same amount. Same `extra\_channels` support as above.
 **Returns** same shape as `splice\_keep\_inside`, or `None` if there isn't
 usable signal on both sides of the cut to stitch together.
 
+### `replay\_splices(x, splices, markers=None, detected\_markers=None) -> dict`
+
+Replays a saved list of splices (PyAT's `splice.json`: `{"mode", "start",
+"end"}` each, in the order they were applied; `"cut\_out"` cuts, any other
+mode keeps the range) on a time axis and marker lists, **without touching
+any signal**. It goes through `splice\_cut\_out` / `splice\_keep\_inside`
+themselves, so `x` and the marker times come out exactly as a full replay
+gives them, down to the last digit. A splice that leaves fewer than 2
+samples is skipped, as PyAT skips it.
+
+**Returns** `{"x", "markers", "detected\_markers", "applied"}` (`applied` =
+how many splices took effect).
+
+\---
+
+## Group analysis
+
+The same event-locked responses measured in every recording of a group,
+reduced to a few numbers per trial, and compared with a linear mixed-effects
+model. Every recording is one subject; the variables are event markers; a
+trial is one occurrence of a marker.
+
+### `GroupSpec`
+
+A dataclass holding everything decided for one group analysis. It
+round-trips through JSON with `to\_dict()` / `GroupSpec.from\_dict(d)`.
+
+| field | default | meaning |
+|---|---|---|
+| `group\_name` | `""` | the group's name (its results folder is named after it) |
+| `subjects` | `\[]` | `\[{"subject": name, "folder": path}, ...]`, names unique |
+| `markers` | `\[]` | marker names, as PyAT lists them (a store's name plus `¹` for onset or `⁰` for offset, or a note's own text) |
+| `store\_labels` | `{}` | store renames in effect when the markers were listed |
+| `pre`, `post` | `10.0`, `10.0` | seconds before / after each event |
+| `baseline` | `(-10.0, -6.0)` | baseline window, seconds relative to the event |
+| `response` | `(0.0, 10.0)` | response window, seconds relative to the event |
+| `signal` | `"dff"` | `"dff"`: trial minus its baseline mean; `"zscore"`: also divided by the baseline SD |
+| `smooth\_seconds` | `0.5` | moving-average smoothing before slicing (0 = none); 0.5 matches the single-recording Event PETH |
+| `metrics` | all five | `"auc"`, `"peak"`, `"mean"`, `"latency"`, `"decay"` |
+| `peak\_direction` | `"absolute"` | `"positive"`, `"negative"` or `"absolute"` (largest deflection either way, signed) |
+| `decay\_fraction` | `0.5` | decay time counts until the trace falls to this share of the peak |
+| `correction` | `"holm"` | multiple-comparison correction across pairwise comparisons: `"holm"`, `"bonferroni"` or `"fdr\_bh"` |
+| `alpha` | `0.05` | significance level a corrected p-value is compared against |
+| `regression\_method` | `"ols"` | motion correction used when each recording's ΔF/F is recomputed |
+
+The defaults follow TDT's own fiber photometry epoch-averaging example
+(`TRANGE = \[-10, 20]` there is start and *duration*: −10 s to +10 s; baseline
+−10 to −6 s). There is no formal standard; GuPPy and pMAT leave the window
+and baseline to the user.
+
+`problems()` returns every reason the spec is unusable as plain sentences
+(empty list = fine); `window\_problems()` returns only the rules for the
+window, baseline and response windows.
+
+### `marker\_index(scans) -> dict`
+
+Which markers the recordings have. `scans` is a list of `{"subject",
+"groups": {marker name: \[event times]}}`. **Returns** `{marker:
+{"recordings", "events", "per\_subject": {subject: n}}}`; a recording with
+no event of a marker is not counted for it.
+
+### `common\_markers(scans) -> list\[str]`
+
+The marker names every one of the recordings has at least one event of, sorted.
+
+### `design\_summary(scans, markers, pre, post) -> dict`
+
+Trials per subject and marker, worked out from the event times alone. A
+trial is *usable* if its whole window `\[event − pre, event + post]` lies
+inside the recording (`scans\[i]\["t\_range"]`, or unknown = all usable);
+trials *overlap* when their windows share samples (events less than
+`pre + post` apart), so trials of one subject are not independent of each
+other.
+
+**Returns** `{"cells": {subject: {marker: {"events", "usable",
+"overlapping"}}}, "markers": {marker: {"events", "usable", "overlapping",
+"subjects\_with\_trials", "min\_usable", "max\_usable"}}, "n\_subjects",
+"warnings": \[{"level": "warning" | "info", "text"}]}`. The warnings cover
+subjects with no usable trials, heavy overlap, and too few subjects for a
+mixed model (under 6) or for its p-values to be more than approximate
+(under 20).
+
+### `extract_group_trials(x, y, events, spec, subject, recording="", trace_step=0.04) -> dict`
+
+Slices one recording into trials and measures each. `x`/`y` are the recording's
+time axis and dF/F (smoothed here with `spec.smooth_seconds`); `events` is
+`{marker name: [event times]}`, only the markers in `spec.markers` are used.
+
+A trial is usable if its whole window lies inside the recording; each usable
+trial's baseline-corrected trace (see `GroupSpec.signal`) is reduced to the
+five measures (`measures_for_trial`) unless the baseline can't be scored (a
+flat z-score baseline) or the window holds non-finite samples -- a trial that
+can't be measured still gets a row, with `valid=False` and a `reason`.
+
+**Returns** `{"trials": DataFrame (one row per usable trial; columns:
+group, subject, recording, marker, trial, event_time, valid, reason, auc,
+peak, mean, latency, decay, baseline_mean, baseline_sd, n_samples,
+overlap), "traces": {marker: {"n", "mean"}} (the mean baseline-corrected
+trace on `grid`), "grid": the common time axis (-pre..+post, spaced
+`trace_step` apart), "excluded": {marker: events left out for not having a
+full window}}`.
+
+### `measures_for_trial(rel_t, y, spec) -> dict | None`
+
+The five measures of one already baseline-corrected trial (`rel_t` seconds
+relative to the event, `y` the trace). Uses `spec.response`, `spec.peak_direction`
+and `spec.decay_fraction`. **Returns** `{"auc", "peak", "mean", "latency",
+"decay"}`, or `None` if the response window holds fewer than 2 samples.
+
+### `decay_time(t, y, peak_index, fraction) -> float`
+
+Seconds from `y[peak_index]` until the trace has fallen to `fraction` of it
+(by linear interpolation between the two samples either side of the
+crossing) -- a positive peak falls, a negative one (a dip) climbs back.
+`nan` if it never gets there, or the peak itself is 0.
+
+### `fit_group_models(trials, spec, progress=None, traces=None, trace_grid=None, excluded=None) -> GroupResults`
+
+Descriptives, linear mixed-effects models and pairwise comparisons for every
+measure in `spec.metrics`, on the trial table from `extract_group_trials`
+(every subject's trials concatenated).
+
+For each measure, twice: **trials** -- every trial is a row; two or more
+markers fit `measure ~ marker` with a random intercept for subject and one
+for each subject x marker cell (statsmodels `MixedLM`, REML); one marker
+fits `measure ~ 1` with a subject random intercept. **means** -- the same on
+subject x marker means, which does not rely on trials being independent, as
+a check. p-values use subject-based degrees of freedom (n - 1 for a
+contrast, like a paired test; (k - 1)(n - 1) for the omnibus F test of
+marker, as in repeated-measures ANOVA) rather than statsmodels' own Wald z,
+which assumes many subjects. With two or more markers, every pairwise
+comparison between markers is corrected (`spec.correction`); with one there
+is nothing to compare it with, so AUC and mean amplitude are tested against
+zero (a baseline-corrected trace has mean zero without a response) and the
+others (peak, latency, decay -- no zero to test) are reported as estimates
+with 95% intervals only.
+
+Why the subject x marker term: trials of one subject and marker share an
+effect of their own, and neighbouring trials share signal when their
+windows overlap. Simulated cohorts with no true difference between markers
+(three markers, 40 trials per cell, 6-20 subjects, with and without
+correlated trials) found a random-intercept-only model called it
+significant in 65-93% of runs at a nominal 5% whenever trials were
+correlated within a cell; the model used here, and repeated-measures ANOVA
+on the cell means, both landed at 4-8%.
+
+**Returns** a `GroupResults` (a dataclass): `trials`, `traces`, `trace_grid`,
+`excluded` (carried through unchanged), `descriptives`, `subject_means`,
+`models`, `fixed_effects`, `omnibus`, `variance`, `estimated_means`,
+`pairwise`, `diagnostics`, `random_effects` (all `pandas.DataFrame`),
+`notes` (`[{"level", "measure", "text"}]` -- dropped markers, boundary
+fits, undefined measures, a warning when the trial-level model and the
+subject-means check disagree about significance), `software` (library
+versions). `.frames()` returns `{name: DataFrame}` for every table.
+
+### `write_group_results(results, directory) -> list[str]`
+
+Writes every non-empty table in `results.frames()` (plus the mean traces
+and `report_text(results)`) as UTF-8-with-BOM files into `directory`
+(created if needed) -- CSVs readable by Excel and pandas alike, and
+`analysis_report.txt`. **Returns** the paths written.
+
+### `group_report_text(results) -> str`
+
+The plain-text report `write_group_results` writes to
+`analysis_report.txt`: the design, the results per measure (with the
+notes), and an auto-written methods paragraph to adapt for a manuscript.
+
 \---
 
 ## Curve-fit models
@@ -476,7 +665,7 @@ answer to field A resemble their answer to field B more than chance
 pairing would predict?" Needs the optional `sentence-transformers`
 package (see [Optional dependencies](#optional-dependencies)).
 
-### `run\_field\_study\_pipeline(folder\_path, text\_fields, delta\_pair=None, paired\_fields=None, model\_name="all-MiniLM-L6-v2", n\_null=200, rng\_seed=None, file\_glob="P-\*.json", min\_words=5) -> pandas.DataFrame`
+### `run\_field\_study\_pipeline(folder\_path, text\_fields, delta\_pair=None, paired\_fields=None, model\_name="all-MiniLM-L6-v2", n\_null=200, rng\_seed=None, file\_glob="P-\*.json", min\_words=5, progress=None) -> pandas.DataFrame`
 
 The single entry point — runs the whole pipeline (load → flag
 low-quality → embed → optional delta vector → optional paired
@@ -495,7 +684,7 @@ that pair — one number per pair, not per subject.
 The stage functions below are also available individually for anyone
 who wants an intermediate result.
 
-### `load\_field\_study\_folder(folder\_path, text\_fields, file\_glob="P-\*.json") -> pandas.DataFrame`
+### `load\_field\_study\_folder(folder\_path, text\_fields, file\_glob="P-\*.json", progress=None) -> pandas.DataFrame`
 
 Loads every file matching `file\_glob` into one row-per-subject
 DataFrame, adding a `wordcount\_<field>` column per text field.
@@ -512,7 +701,7 @@ Flags (doesn't drop) near-empty responses. Adds `low\_quality\_<field>`
 per field and `any\_low\_quality` (OR across fields). Must run after
 `load\_field\_study\_folder` (needs the `wordcount\_<field>` columns).
 
-### `embed\_text\_fields(df, fields, model\_name="all-MiniLM-L6-v2") -> dict`
+### `embed\_text\_fields(df, fields, model\_name="all-MiniLM-L6-v2", progress=None) -> dict`
 
 Embeds each field with a `sentence-transformers` model, L2-normalized
 (so a plain dot product is cosine similarity). Returns
@@ -523,7 +712,7 @@ with an install hint if `sentence-transformers` isn't installed.
 
 Per-subject `vec(field\_to) - vec(field\_from)`, plus its magnitude.
 
-### `compute\_paired\_similarity(embeddings, paired\_fields, n\_null=200, rng\_seed=None) -> dict`
+### `compute\_paired\_similarity(embeddings, paired\_fields, n\_null=200, rng\_seed=None, progress=None) -> dict`
 
 Cosine similarity between each field pair for the same subject, plus a
 null distribution built by repeatedly shuffling one field's vectors
@@ -560,14 +749,14 @@ A companion module that stress-tests a Text Field Study result: is the
 similarity real, or could it be a word-count artifact, a single outlier
 subject, or noise that wouldn't survive multiple-comparisons correction?
 
-### `run\_validation\_pipeline(folder\_path, text\_fields, paired\_fields, model\_name="all-MiniLM-L6-v2", n\_null=200, n\_boot=1000, rng\_seed=None, file\_glob="P-\*.json", id\_field="participant\_id") -> pandas.DataFrame`
+### `run\_validation\_pipeline(folder\_path, text\_fields, paired\_fields, model\_name="all-MiniLM-L6-v2", n\_null=200, n\_boot=1000, rng\_seed=None, file\_glob="P-\*.json", id\_field="participant\_id", progress=None) -> pandas.DataFrame`
 
 Full validation pipeline: load → embed → paired similarity → build the
 summary table below. Self-contained (recomputes embeddings rather than
 reusing a prior `run\_field\_study\_pipeline` call). `paired\_fields` is
 required here — there's nothing to validate without at least one pair.
 
-### `build\_validation\_summary(df, paired\_fields, similarity\_results, id\_field="participant\_id", n\_boot=1000, rng\_seed=None) -> pandas.DataFrame`
+### `build\_validation\_summary(df, paired\_fields, similarity\_results, id\_field="participant\_id", n\_boot=1000, rng\_seed=None, progress=None) -> pandas.DataFrame`
 
 One row per field pair:
 
@@ -624,9 +813,60 @@ automatically wrong/excludable — it's worth a manual look.
 
 \---
 
+## Progress reporting
+
+Every slow function takes an optional `progress` argument (it is in the
+signature of each one above), built on [tqdm](https://tqdm.github.io):
+
+|`progress=`|what happens|
+|-|-|
+|`None` *(default)*|silent, and it costs nothing|
+|`True`|a tqdm progress bar on the console (stderr), for scripts and notebooks|
+|a callable|called as `progress(fraction, message)`: `fraction` runs 0.0 to 1.0 and never goes backwards, and `message` says what is happening right now (e.g. `"Fitting photobleaching baseline"`). It may be called from whatever thread the work runs on, so a GUI should hand each call over to its own thread (PyAT turns it into a Qt signal that updates a toast)|
+
+```python
+result = pl.process_tdt_folder(folder_path, progress=True)
+result = pl.process_tdt_folder(folder_path, progress=lambda fraction, message: print(f"{fraction:4.0%}  {message}"))
+```
+
+Progress never changes a result, and a callback that raises is switched off
+with a warning instead of aborting the work it was only watching.
+
+What reports, and how: `process\_tdt\_folder` / `get\_tdt\_struct` / `compute\_dff`
+by stage (reading the streams, each event store, motion correction, the
+photobleaching baseline), the Oxysoft loaders by bytes read, `load\_any\_file`
+by sheet (Excel) or by row pass (CSV/TSV/text), `compute\_event\_zscore\_peth`
+and `find\_peak\_near\_events` by event, and the Text Field Study pipelines
+(`load\_field\_study\_folder`, `embed\_text\_fields`, `compute\_paired\_similarity`,
+`run\_field\_study\_pipeline`, `build\_validation\_summary`, `run\_validation\_pipeline`)
+by step, the language-model load and the embedding being the long ones.
+
+### `Plan(progress, stages)`
+
+Turns named, weighted stages into one 0-1 fraction: for your own slow code,
+or to give a callee a slice of your bar.
+
+```python
+plan = pl.Plan(progress, [("Reading files", 30), ("Fitting", 70)])
+for path in plan.track("Reading files", paths):      # a tqdm iterator, so updates are throttled
+    ...
+plan.begin("Fitting")
+fit(data, progress=plan.sub("Fitting"))              # the callee's 0-1 is mapped into this stage
+plan.done()
+```
+
+* `plan.track(stage, iterable, total=None)` iterates as that stage; `plan.bar(stage, total)` is the same for updates by hand (`bar.update(n)`); `plan.begin(stage)` marks a step with no loop to tick; `plan.sub(stage)` is a stage as a `progress` callback for another function; `plan.done()` reports 100%.
+* With `progress=None` every one of these is a no-op: `track` hands the iterable straight back and `sub` returns `None`, so the callee stays silent too.
+
+### `track(iterable, progress=None, description="Working", total=None)`
+
+`Plan` for a single loop: `for f in pl.track(files, progress, "Reading files"): ...`
+
+\---
+
 ## Optional dependencies
 
-`numpy`, `scipy`, `pandas`, `tdt`, and `scikit-learn` are regular,
+`numpy`, `scipy`, `pandas`, `tdt`, `scikit-learn`, and `tqdm` are regular,
 required dependencies (installed automatically by
 `pip install ZaksPhysicsLibrary`) — `scikit-learn` in particular backs
 *all* of `process\_tdt\_folder`'s regression methods including `"ols"`,

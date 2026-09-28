@@ -19,6 +19,7 @@ just how to call it.
 import numpy as np
 import pandas as pd
 
+from .progress import Plan
 from .text_field_study import (
     load_field_study_folder,
     embed_text_fields,
@@ -291,7 +292,8 @@ def leave_one_out_sensitivity(values, ids=None):
     }
 
 
-def build_validation_summary(df, paired_fields, similarity_results, id_field="participant_id", n_boot=1000, rng_seed=None):
+def build_validation_summary(df, paired_fields, similarity_results, id_field="participant_id", n_boot=1000, rng_seed=None,
+                             progress=None):
     """
     Folds every check above into one summary table, one row per field
     pair — see each column's meaning below (and the stage functions'
@@ -312,6 +314,8 @@ def build_validation_summary(df, paired_fields, similarity_results, id_field="pa
     id_field : str
     n_boot : int
     rng_seed : int or None
+    progress : None, True or callable(fraction, message)
+        Progress reporting, one tick per pair; see PhysicsLibrary.progress.
 
     Returns
     -------
@@ -340,7 +344,8 @@ def build_validation_summary(df, paired_fields, similarity_results, id_field="pa
     """
     rows = []
     p_values = []
-    for field_a, field_b, name in paired_fields:
+    for field_a, field_b, name in Plan(progress, [("Validating field pairs", 1)]).track(
+            "Validating field pairs", paired_fields):
         result = similarity_results[name]
         same = result["same_subject_similarity"]
         null_values = result["null_values"]
@@ -382,7 +387,7 @@ def build_validation_summary(df, paired_fields, similarity_results, id_field="pa
 def run_validation_pipeline(folder_path, text_fields, paired_fields,
                              model_name="all-MiniLM-L6-v2", n_null=200,
                              n_boot=1000, rng_seed=None, file_glob="P-*.json",
-                             id_field="participant_id"):
+                             id_field="participant_id", progress=None):
     """
     Full validation pipeline: load -> embed -> compute paired similarity
     -> build the validation summary table (see build_validation_summary
@@ -408,6 +413,10 @@ def run_validation_pipeline(folder_path, text_fields, paired_fields,
     file_glob : str
     id_field : str
         Column to use as subject identifiers in the leave-one-out flags.
+    progress : None, True or callable(fraction, message)
+        Progress reporting; see PhysicsLibrary.progress. Loading the
+        embedding model (a download the first time) and embedding the
+        responses are the longest steps.
 
     Returns
     -------
@@ -417,10 +426,15 @@ def run_validation_pipeline(folder_path, text_fields, paired_fields,
     if not paired_fields:
         raise ValueError("paired_fields is required — nothing to validate without at least one pair.")
 
-    df = load_field_study_folder(folder_path, text_fields, file_glob=file_glob)
+    plan = Plan(progress, [("Reading study files", 5), ("Embedding responses", 70),
+                           ("Comparing field pairs", 5), ("Validating field pairs", 20)])
+    df = load_field_study_folder(folder_path, text_fields, file_glob=file_glob,
+                                 progress=plan.sub("Reading study files"))
     fields_to_embed = sorted({f for field_a, field_b, _ in paired_fields for f in (field_a, field_b)})
-    embeddings = embed_text_fields(df, fields_to_embed, model_name=model_name)
-    similarity_results = compute_paired_similarity(embeddings, paired_fields, n_null=n_null, rng_seed=rng_seed)
+    embeddings = embed_text_fields(df, fields_to_embed, model_name=model_name,
+                                   progress=plan.sub("Embedding responses"))
+    similarity_results = compute_paired_similarity(embeddings, paired_fields, n_null=n_null, rng_seed=rng_seed,
+                                                   progress=plan.sub("Comparing field pairs"))
 
     # build_validation_summary's regression step needs sim_<name> columns
     # on df, same as run_field_study_pipeline adds them.
@@ -430,4 +444,5 @@ def run_validation_pipeline(folder_path, text_fields, paired_fields,
     return build_validation_summary(
         df, paired_fields, similarity_results,
         id_field=id_field, n_boot=n_boot, rng_seed=rng_seed,
+        progress=plan.sub("Validating field pairs"),
     )

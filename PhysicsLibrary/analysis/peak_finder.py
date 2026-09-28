@@ -10,6 +10,7 @@ event marker itself marks where the neural signal responds.
 import numpy as np
 from scipy.signal import find_peaks
 
+from ..progress import Plan
 from .shared import estimate_sample_rate
 from .zscore_peth import get_zscore_slice
 
@@ -74,7 +75,7 @@ def find_significant_peaks(time_array, signal, z_threshold=5.0, min_distance_sec
 
 
 def find_peak_near_events(time_array, signal, event_times, pre, post,
-                           z_threshold=5.0, include_troughs=False):
+                           z_threshold=5.0, include_troughs=False, progress=None):
     """
     Check whether a statistically significant peak actually shows up near
     each given event time, rather than assuming the event marker itself
@@ -106,6 +107,8 @@ def find_peak_near_events(time_array, signal, event_times, pre, post,
     include_troughs : bool
         Also consider negative-going deflections as candidate "peaks",
         keeping whichever (peak or trough) is more extreme.
+    progress : None, True or callable(fraction, message)
+        Progress reporting, one tick per event; see PhysicsLibrary.progress.
 
     Returns
     -------
@@ -117,7 +120,7 @@ def find_peak_near_events(time_array, signal, event_times, pre, post,
     recording's edges) or nothing in it reached z_threshold.
     """
     results = []
-    for t in event_times:
+    for t in Plan(progress, [("Searching for peaks", 1)]).track("Searching for peaks", event_times):
         seg_x, seg_z = get_zscore_slice(time_array, signal, t, pre=pre, post=post)
         if seg_x is None or len(seg_x) == 0:
             results.append({"event_time": t, "found": False, "peak_time": None,

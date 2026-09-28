@@ -17,18 +17,27 @@ from typing import Optional
 import numpy as np
 
 from ..dataset import Dataset
+from ..progress import Plan
+
+_PROGRESS_CHUNK = 1 << 18   # bytes read between progress ticks (tqdm throttles the rest)
 
 
-def load_oxysoft(folder_path: str, folder_name: str) -> Dataset:
+def load_oxysoft(folder_path: str, folder_name: str, progress=None) -> Dataset:
     """
     Parse an Oxysoft TXT export folder.
     Multiple .txt files are concatenated in alphabetical order.
+
+    `progress` (None, True or callable(fraction, message); see
+    PhysicsLibrary.progress) is weighted by each file's size in bytes.
     """
     txt_files = sorted(
         f for f in os.listdir(folder_path) if f.lower().endswith('.txt')
     )
     if not txt_files:
         raise FileNotFoundError(f"No .txt files found in: {folder_path}")
+
+    sizes = {f: os.path.getsize(os.path.join(folder_path, f)) or 1 for f in txt_files}
+    plan = Plan(progress, [(f, sizes[f]) for f in txt_files] + [("Combining files", 0.02 * sum(sizes.values()))])
 
     all_o2hb:  list[np.ndarray] = []
     all_hhb:   list[np.ndarray] = []
@@ -40,7 +49,7 @@ def load_oxysoft(folder_path: str, folder_name: str) -> Dataset:
 
     for fname in txt_files:
         fpath = os.path.join(folder_path, fname)
-        o2hb, hhb, events, meta, labels, fs = _parse_oxysoft_txt(fpath)
+        o2hb, hhb, events, meta, labels, fs = _parse_oxysoft_txt(fpath, progress=plan.sub(fname))
 
         if first_file:
             metadata    = meta
@@ -52,6 +61,7 @@ def load_oxysoft(folder_path: str, folder_name: str) -> Dataset:
         all_hhb.append(hhb)
         all_events.extend(events)
 
+    plan.begin("Combining files")
     # o2hb / hhb: shape (n_channels, n_samples)
     o2hb_concat = np.concatenate(all_o2hb, axis=1)
     hhb_concat  = np.concatenate(all_hhb,  axis=1)
@@ -65,6 +75,7 @@ def load_oxysoft(folder_path: str, folder_name: str) -> Dataset:
     # Channel names: e.g. ['Tx1 O2Hb', 'Tx2 O2Hb', 'Tx3 O2Hb', 'Tx1 HHb', ...]
     o2hb_names = [f"{l} O2Hb" for l in ch_labels]
     hhb_names  = [f"{l} HHb"  for l in ch_labels]
+    plan.done()
 
     return Dataset(
         source_format = "Oxysoft",
@@ -84,10 +95,14 @@ def load_oxysoft(folder_path: str, folder_name: str) -> Dataset:
     )
 
 
-def load_oxysoft_file(file_path: str) -> Dataset:
-    """Parse a single Oxysoft .txt export into a Dataset."""
+def load_oxysoft_file(file_path: str, progress=None) -> Dataset:
+    """Parse a single Oxysoft .txt export into a Dataset.
+
+    `progress` (None, True or callable(fraction, message); see
+    PhysicsLibrary.progress) follows the file as it is read.
+    """
     folder_name = os.path.splitext(os.path.basename(file_path))[0]
-    o2hb, hhb, events, metadata, ch_labels, sample_rate = _parse_oxysoft_txt(file_path)
+    o2hb, hhb, events, metadata, ch_labels, sample_rate = _parse_oxysoft_txt(file_path, progress=progress)
     if o2hb.ndim < 2 or o2hb.shape[0] == 0:
         raise ValueError(
             f"No O2Hb channels recognized in the Legend block of {os.path.basename(file_path)} — "
@@ -114,6 +129,7 @@ def load_oxysoft_file(file_path: str) -> Dataset:
 
 def _parse_oxysoft_txt(
     filepath: str,
+    progress=None,
 ) -> tuple[np.ndarray, np.ndarray, list[dict], dict, list[str], float]:
     """
     Parse a single Oxysoft .txt file.
@@ -121,6 +137,9 @@ def _parse_oxysoft_txt(
     The Oxysoft format has a Legend block that maps column numbers to
     channel names, followed by a numeric header row (1  2  3 ...) and
     then the data. Row 0 is absolute baseline and is skipped.
+
+    `progress` follows the bytes read (the total isn't known in lines
+    without a second pass over the file); see PhysicsLibrary.progress.
 
     Returns
     -------
@@ -145,8 +164,18 @@ def _parse_oxysoft_txt(
     in_data         = False
     fit_factor_col: Optional[int] = None
 
-    with open(filepath, 'r', encoding='utf-8', errors='replace') as fh:
+    plan = Plan(progress, [("Reading file", 92), ("Building channels", 8)])
+    size = os.path.getsize(filepath)
+    unreported = 0
+
+    with plan.bar("Reading file", size) as bar, \
+            open(filepath, 'r', encoding='utf-8', errors='replace') as fh:
         for raw_line in fh:
+            unreported += len(raw_line)
+            if unreported >= _PROGRESS_CHUNK:
+                bar.update(unreported)
+                unreported = 0
+
             line  = raw_line.rstrip('\n')
             parts = line.split('\t')
 
@@ -219,6 +248,7 @@ def _parse_oxysoft_txt(
     if not data_rows:
         raise ValueError(f"No data rows parsed from {filepath}")
 
+    plan.begin("Building channels")
     data = np.array(data_rows, dtype=np.float64)  # (n_samples, n_cols)
 
     # Sort col_map into ordered O2Hb and HHb columns
@@ -239,4 +269,5 @@ def _parse_oxysoft_txt(
     if fit_factor_col is not None and fit_factor_col < data.shape[1]:
         metadata['fit_factor_mean'] = float(np.mean(data[:, fit_factor_col]))
 
+    plan.done()
     return o2hb, hhb, events, metadata, channel_labels, sample_rate

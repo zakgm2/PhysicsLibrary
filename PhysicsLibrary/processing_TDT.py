@@ -16,6 +16,8 @@ from scipy.signal import butter, filtfilt
 import tdt
 
 from .models import double_exponential_model as double_exponential
+from .progress import Plan
+from .splice import replay_splices
 
 REGRESSION_METHODS = ("ransac", "huber", "ols")
 
@@ -173,7 +175,7 @@ def validate_tdt_folder(path):
         return False, "Invalid Folder: No TDT block files (.Tbk) found."
 
 
-def compute_dff(y_465, y_415, fs, regression_method="ols"):
+def compute_dff(y_465, y_415, fs, regression_method="ols", progress=None):
     """
     The actual motion-correction + bleaching-correction + ΔF/F + denoise
     pipeline (steps 3-6 of process_tdt_folder's docstring), factored out
@@ -195,6 +197,10 @@ def compute_dff(y_465, y_415, fs, regression_method="ols"):
         Sampling rate, for correct_bleaching/denoise_signal.
     regression_method : {"ransac", "huber", "ols"}
         See _robust_linear_fit.
+    progress : None, True or callable(fraction, message)
+        Progress reporting; see PhysicsLibrary.progress. The photobleaching
+        fit dominates the run time (a single scipy call with no steps to
+        tick), so it shows as one long stage.
 
     Returns
     -------
@@ -219,22 +225,34 @@ def compute_dff(y_465, y_415, fs, regression_method="ols"):
     # Everything is done in float64: TDT hands over float32, and the fit (see
     # _robust_linear_fit) is not safe in single precision.
     y_465 = np.asarray(y_465, dtype=np.float64)
+    # Weights are roughly the measured share of the run time: on a 17-minute
+    # 1 kHz recording the bleaching fit is ~70-90% of it, the regression 2-20%
+    # depending on the method, the filtering almost nothing.
+    stages = [("Fitting motion correction", 10)] if y_415 is not None else []
+    plan = Plan(progress, stages + [("Fitting photobleaching baseline", 83),
+                                    ("Normalising and filtering", 7)])
     if y_415 is not None:
         y_415 = np.asarray(y_415, dtype=np.float64)
+        plan.begin("Fitting motion correction")
         a, b, inlier_fraction = _robust_linear_fit(y_415, y_465, method=regression_method)
         y_fit = a * y_415 + b
         y_final = y_465 - y_fit
+        plan.begin("Fitting photobleaching baseline")
         _, trend = correct_bleaching(y_465, fs)
         f0  = np.maximum(trend, 1e-6)
+        plan.begin("Normalising and filtering")
         dff = y_final / f0
     else:
         y_final = y_465
         inlier_fraction = None
+        plan.begin("Fitting photobleaching baseline")
         _, trend = correct_bleaching(y_final, fs)
         f0  = np.maximum(trend, 1e-6)
+        plan.begin("Normalising and filtering")
         dff = (y_final - f0) / f0
 
     dff = denoise_signal(dff, fs, cutoff=5)
+    plan.done()
 
     return {
         "raw": y_final,
@@ -245,7 +263,7 @@ def compute_dff(y_465, y_415, fs, regression_method="ols"):
     }
 
 
-def process_tdt_folder(folder_path, regression_method="ols"):
+def process_tdt_folder(folder_path, regression_method="ols", progress=None):
     """
     Full photometry processing pipeline for a TDT recording.
 
@@ -269,6 +287,11 @@ def process_tdt_folder(folder_path, regression_method="ols"):
         non-robust baseline — see _robust_linear_fit for why that's the
         safer default over RANSAC/Huber despite being the least
         artifact-resistant of the three.
+    progress : None, True or callable(fraction, message)
+        Progress reporting (see PhysicsLibrary.progress): True draws a tqdm
+        bar on the console; a callable receives (fraction 0-1, message) as
+        the recording is read, motion/bleaching-corrected and its markers
+        extracted.
 
     Returns
     -------
@@ -292,7 +315,10 @@ def process_tdt_folder(folder_path, regression_method="ols"):
           _robust_linear_fit for what this means per regression_method),
           or None if there was no 415 reference stream to correct against
     """
-    data_struct = get_tdt_struct(folder_path)
+    # Weights follow where the time goes (measured on a 17-minute, 1 kHz recording:
+    # ~35% reading the block, ~64% fitting/normalising, the marker extraction ~0).
+    plan = Plan(progress, [("Reading recording", 35), ("Computing dF/F", 64), ("Extracting markers", 1)])
+    data_struct = get_tdt_struct(folder_path, progress=plan.sub("Reading recording"))
     streams = data_struct.streams.keys()
 
     name_465 = next((s for s in streams if '465' in s), None)
@@ -309,7 +335,8 @@ def process_tdt_folder(folder_path, regression_method="ols"):
     display_name = (f"Corrected {name_465} (via {name_415})" if name_415
                      else f"{name_465} (Uncorrected)")
 
-    computed = compute_dff(y_465, y_415, fs, regression_method=regression_method)
+    computed = compute_dff(y_465, y_415, fs, regression_method=regression_method,
+                           progress=plan.sub("Computing dF/F"))
     y_final = computed["raw"]
     dff = computed["corr"]
     f0 = computed["f0"]
@@ -328,6 +355,10 @@ def process_tdt_folder(folder_path, regression_method="ols"):
     if name_415:
         channels.append({"key": "isosbestic", "label": f"Isosbestic ({name_415})", "y": y_415})
 
+    plan.begin("Extracting markers")
+    markers = get_event_markers(data_struct)
+    plan.done()
+
     return {
         "x":        x,
         "raw":      y_final,
@@ -336,13 +367,13 @@ def process_tdt_folder(folder_path, regression_method="ols"):
         "f0":       f0,
         "fs":       fs,
         "store":    display_name,
-        "markers":  get_event_markers(data_struct),
+        "markers":  markers,
         "channels": channels,
         "motion_correction_inlier_fraction": inlier_fraction,
     }
 
 
-def get_tdt_struct(path):
+def get_tdt_struct(path, progress=None, read_streams=True):
     """
     Load a Tucker-Davis Technologies (TDT) recording block.
 
@@ -374,6 +405,15 @@ def get_tdt_struct(path):
     ----------
     path : str
         Folder containing TDT data.
+    progress : None, True or callable(fraction, message)
+        Progress reporting (see PhysicsLibrary.progress). Reading the
+        streams is one opaque SDK call; each epoc store read after it ticks
+        the bar.
+    read_streams : bool
+        False skips the streams (the slow part of the read, and not needed
+        just to list a block's event markers — see scan_tdt_markers): the
+        block's info, scalars and epoc stores are still read, and
+        data.streams is empty.
 
     Returns
     -------
@@ -382,18 +422,22 @@ def get_tdt_struct(path):
     """
     import warnings
 
+    plan = Plan(progress, [("Reading streams" if read_streams else "Reading block header", 55),
+                           ("Reading event stores", 45)])   # ~0.3 s vs ~0.25 s measured
+    plan.begin("Reading streams" if read_streams else "Reading block header")
     heads = tdt.read_block(path, headers=1)
     if heads is None:
         raise Exception("TDT returned an empty object.")
 
-    data = tdt.read_block(path, headers=heads, evtype=['streams', 'scalars'], verbose=0)
+    data = tdt.read_block(path, headers=heads, evtype=['streams', 'scalars'] if read_streams else ['scalars'],
+                          verbose=0)
     if data is None:
         raise Exception("TDT returned an empty object.")
 
     epoc_stores = [(key, s.name) for key, s in heads.stores.items()
                    if getattr(s, 'type_str', None) == 'epocs']
 
-    for key, real_name in epoc_stores:
+    for key, real_name in plan.track("Reading event stores", epoc_stores):
         try:
             # No headers= reuse here — see docstring.
             ep = tdt.read_block(path, store=real_name, evtype=['epocs'], verbose=0)
@@ -409,6 +453,81 @@ def get_tdt_struct(path):
         setattr(data.epocs, key, ep.epocs[store_key])
 
     return data
+
+
+def _block_duration(data):
+    """Seconds between a block's start and stop time (what Synapse recorded), or None."""
+    duration = getattr(getattr(data, "info", None), "duration", None)
+    if duration is None:
+        return None
+    try:
+        return float(duration.total_seconds())
+    except AttributeError:
+        try:
+            return float(duration)
+        except (TypeError, ValueError):
+            return None
+
+
+def scan_tdt_markers(folder_path, splices=None, progress=None):
+    """
+    List the event markers of a TDT block without processing the recording: no
+    dF/F, and the streams are only read when `splices` need the recording's time
+    axis. Group analysis uses it to find out which markers each recording has, and
+    how many, before any signal work is done; reading the markers takes about a
+    third of a second, processing the whole recording about two.
+
+    Parameters
+    ----------
+    folder_path : str
+        Folder containing the TDT block.
+    splices : list of {"mode", "start", "end"}, optional
+        The recording's saved splices (PyAT's splice.json), applied to the marker
+        times and the recording's span in order, exactly as PyAT does when it
+        restores them (see splice.replay_splices).
+    progress : None, True or callable(fraction, message)
+        Progress reporting (see PhysicsLibrary.progress).
+
+    Returns
+    -------
+    dict with
+        markers : list of dict
+            What get_event_markers returns (time, label, color, store and, for
+            onset/offset markers, phase), after the splices if there are any.
+        t_range : (first, last) sample time in seconds, or None if the block does
+            not say how long it is. Exact when `splices` were given (the time axis
+            was rebuilt); otherwise (0, the block's recorded duration), which can
+            be a few hundredths of a second past the last sample.
+        n_splices : how many of the given splices took effect.
+        block_name : the block's name (Synapse's Subject-YYMMDD-HHMMSS), or None.
+        start_time : ISO date-time the block started, or None.
+    """
+    splices = list(splices or [])
+    data = get_tdt_struct(folder_path, progress=progress, read_streams=bool(splices))
+    markers = get_event_markers(data)
+    info = getattr(data, "info", None)
+
+    n_applied = 0
+    if splices:
+        name_465 = next((s for s in data.streams.keys() if '465' in s), None)
+        if not name_465:
+            raise ValueError("No 465 signal found")
+        x, _, _ = get_plot_data(data, name_465)
+        replayed = replay_splices(x, splices, detected_markers=markers)
+        x, markers, n_applied = replayed["x"], replayed["detected_markers"], replayed["applied"]
+        t_range = (float(x[0]), float(x[-1]))
+    else:
+        duration = _block_duration(data)
+        t_range = (0.0, duration) if duration is not None else None
+
+    start = getattr(info, "start_date", None)
+    return {
+        "markers": markers,
+        "t_range": t_range,
+        "n_splices": n_applied,
+        "block_name": getattr(info, "blockname", None),
+        "start_time": start.isoformat() if hasattr(start, "isoformat") else None,
+    }
 
 
 def get_plot_data(data, store_name, channel=0, max_points=None):

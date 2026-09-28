@@ -15,6 +15,7 @@ Data processing and analysis library backing [PyAT (Python Analysis Tool)](https
 - **Fits curves** — linear, single/double exponential, exponential rise, Gaussian, sinusoidal, and a photon-entanglement visibility model, all via `scipy.optimize.curve_fit`
 - **Analyses text field studies** — one JSON file per subject with several free-text fields; pick any pair of fields to compare directly (e.g. does the answer to one question track another for the same subject). Word counts, data-quality flagging, sentence-transformers embeddings, an optional delta-vector magnitude between two fields, and an optional paired-similarity metric per pair with a permutation test and a word-count confound check. Domain-agnostic — field names and which pairs to compare are supplied by the caller, nothing is hardcoded to one study
 - **Validates the similarity metric statistically** — Benjamini-Hochberg FDR-corrected permutation-test p-values, Cohen's d effect size, a word-count-controlled OLS regression (statsmodels), a bootstrap confidence interval on the mean, and a leave-one-out sensitivity check, one row per field pair, with docstrings explaining what each statistic means
+- **Reports progress on anything slow** — loaders, the TDT pipeline, PETH and peak searches and the text-study pipelines take `progress=True` (a [tqdm](https://tqdm.github.io) bar on the console) or a callback receiving `(fraction, message)`, which is how PyAT shows a live percentage; silent by default
 
 ---
 
@@ -28,6 +29,7 @@ PhysicsLibrary/
   file_parser_generic.py    Generic Excel/CSV/TSV/text parser with sub-table detection
   processing_TDT.py          TDT tank reading, bleach correction, denoising, event markers
   analysis.py                 PETH/Z-score, FFT, slope segments, curve-fit runner
+  progress.py                  tqdm-based progress reporting shared by the slow functions (Plan, track)
   models.py                    Parametric model functions for curve fitting
   text_field_study.py           Grouped-text-field study pipeline (embeddings, delta vector, paired similarity)
   field_study_validation.py      Statistical validation for the paired-similarity metric (permutation test, Cohen's d, regression, bootstrap CI, leave-one-out)
@@ -56,7 +58,7 @@ git+https://github.com/zakgm2/PhysicsLibrary.git
 ### Requirements
 
 - Python 3.10+
-- `numpy`, `scipy`, `tdt`, `pandas`, `sentence-transformers`, `statsmodels`, `scikit-learn` (installed automatically)
+- `numpy`, `scipy`, `tdt`, `pandas`, `sentence-transformers`, `statsmodels`, `scikit-learn`, `tqdm` (installed automatically)
 - `sentence-transformers` pulls in `torch`/`transformers` as transitive dependencies — a genuinely heavy install (hundreds of MB) if you only need the signal-processing side; only actually loaded when you call `embed_text_fields`/`run_field_study_pipeline`
 - `openpyxl` — only needed for `.xlsx`/`.xls` files; imported lazily with a clear error if missing when you actually try to load Excel
 
@@ -80,6 +82,12 @@ dataset.sample_rate      # Hz
 dataset.signals            # (num_channels, num_samples)
 dataset.channel_names        # list[str]
 dataset.events                # [{'label': str, 'sample': int}, ...]
+```
+
+```python
+# Anything slow takes progress=: True draws a tqdm bar, a callable gets (fraction 0-1, message)
+result = pl.process_tdt_folder(folder_path, progress=True)
+result = pl.process_tdt_folder(folder_path, progress=lambda fraction, message: print(f"{fraction:4.0%}  {message}"))
 ```
 
 ```python
