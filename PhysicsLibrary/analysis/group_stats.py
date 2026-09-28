@@ -39,6 +39,7 @@ are reported as estimates with 95% intervals only.
 
 import itertools
 import math
+import re
 import warnings
 from dataclasses import dataclass, field
 
@@ -48,7 +49,6 @@ import scipy
 import scipy.stats as st
 import statsmodels
 import statsmodels.formula.api as smf
-from patsy import dmatrix
 from statsmodels.stats.multitest import multipletests
 
 from ..progress import Plan
@@ -207,14 +207,29 @@ def _tests(est, se, df):
 
 
 def _design_rows(res, markers):
-    """The fixed-effects design row for each marker, aligned with res.fe_params."""
+    """
+    The fixed-effects design row for each marker, aligned with res.fe_params. Built directly from the
+    treatment-coded `C(marker)[T.<level>]` column names rather than re-deriving them through the formula
+    engine's own design-matrix machinery (statsmodels' formula backend switched from patsy to formulaic in
+    0.15, which dropped the patsy-specific `design_info` this used to read; the `C(marker)[T....]` naming
+    convention itself is unchanged across both).
+    """
     if len(markers) == 1:
         return {markers[0]: np.ones(1)}
-    info = res.model.data.design_info
+    names = list(res.fe_params.index)
+    col_for_marker = {}
+    for name in names:
+        match = re.fullmatch(r"C\(marker\)\[T\.(.*)\]", name)
+        if match:
+            col_for_marker[match.group(1)] = name
     rows = {}
     for m in markers:
-        frame = pd.DataFrame({"marker": pd.Categorical([m], categories=markers)})
-        rows[m] = np.asarray(dmatrix(info, frame, return_type="dataframe"), float)[0]
+        row = np.zeros(len(names))
+        row[names.index("Intercept")] = 1.0
+        col = col_for_marker.get(m)
+        if col is not None:
+            row[names.index(col)] = 1.0
+        rows[m] = row
     return rows
 
 

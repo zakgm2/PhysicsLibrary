@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ZaksPhysicsLibrary"
-version = "2026.9.27"
+version = "2026.9.28"
 description = "Data processing and analysis library for TDT, Oxysoft NIRS, Terranova EFNMR lab data, and text-field studies"
 requires-python = ">=3.10"
 readme = "README.md"

@@ -2,6 +2,20 @@
 
 ---
 
+## Version 2026.9.28:
+  Fixed:
+  - Group analysis with two or more markers raised `AttributeError: 'PandasData' object has no attribute
+    'design_info'` on a fresh install. `2026.9.27` (yanked from active use by this release; the CI test job
+    that would have caught it ran *after* the PyPI publish job and failed) read a patsy-specific attribute
+    off the fitted mixed model to reconstruct each marker's design row; `statsmodels` 0.15.0, released the
+    same day, switched its formula backend from `patsy` to `formulaic` by default and dropped that
+    attribute. `group_stats.py`'s `_design_rows` no longer touches the formula engine's internals at all —
+    it reads the `C(marker)[T.<level>]` dummy-column names straight off the fitted result, a naming
+    convention unchanged across both engines — so this works on `statsmodels` 0.14.x and 0.15.x alike.
+    Verified in a clean install of each. No API change; single-marker analyses were never affected.
+
+---
+
 ## Version 2026.9.27:
   New:
   - Group analysis (Hypothesis Testing across recordings): `analysis/group.py` (`GroupSpec`,
